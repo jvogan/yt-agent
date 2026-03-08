@@ -93,28 +93,42 @@ def fetch_info(target: str) -> dict[str, Any]:
     return _run_json([yt_dlp, "--dump-single-json", "--no-warnings", normalized])
 
 
-def resolve_targets(inputs: list[str], *, source_query: str | None = None) -> ResolutionResult:
+def resolve_payload(
+    user_input: str,
+    payload: dict[str, Any],
+    *,
+    source_query: str | None = None,
+) -> ResolutionResult:
     targets: list[DownloadTarget] = []
     skipped_messages: list[str] = []
+    entries = payload.get("entries")
+    if isinstance(entries, list):
+        for index, entry in enumerate(entries, start=1):
+            if not entry:
+                skipped_messages.append(f"Skipped unavailable playlist entry #{index} from {user_input}.")
+                continue
+            try:
+                info = VideoInfo.from_yt_dlp(entry, original_url=user_input)
+            except InvalidInputError:
+                skipped_messages.append(f"Skipped playlist entry #{index} from {user_input}: missing id.")
+                continue
+            targets.append(DownloadTarget(original_input=user_input, info=info, source_query=source_query))
+        return ResolutionResult(targets=targets, skipped_messages=skipped_messages)
+
+    info = VideoInfo.from_yt_dlp(payload, original_url=user_input)
+    targets.append(DownloadTarget(original_input=user_input, info=info, source_query=source_query))
+    return ResolutionResult(targets=targets, skipped_messages=skipped_messages)
+
+
+def resolve_targets(inputs: list[str], *, source_query: str | None = None) -> ResolutionResult:
+    all_targets: list[DownloadTarget] = []
+    all_skipped_messages: list[str] = []
     for user_input in inputs:
         payload = fetch_info(user_input)
-        entries = payload.get("entries")
-        if isinstance(entries, list):
-            for index, entry in enumerate(entries, start=1):
-                if not entry:
-                    skipped_messages.append(f"Skipped unavailable playlist entry #{index} from {user_input}.")
-                    continue
-                try:
-                    info = VideoInfo.from_yt_dlp(entry, original_url=user_input)
-                except InvalidInputError:
-                    skipped_messages.append(f"Skipped playlist entry #{index} from {user_input}: missing id.")
-                    continue
-                targets.append(DownloadTarget(original_input=user_input, info=info, source_query=source_query))
-            continue
-
-        info = VideoInfo.from_yt_dlp(payload, original_url=user_input)
-        targets.append(DownloadTarget(original_input=user_input, info=info, source_query=source_query))
-    return ResolutionResult(targets=targets, skipped_messages=skipped_messages)
+        resolution = resolve_payload(user_input, payload, source_query=source_query)
+        all_targets.extend(resolution.targets)
+        all_skipped_messages.extend(resolution.skipped_messages)
+    return ResolutionResult(targets=all_targets, skipped_messages=all_skipped_messages)
 
 
 def download_target(target: DownloadTarget, settings: Settings) -> DownloadExecution:

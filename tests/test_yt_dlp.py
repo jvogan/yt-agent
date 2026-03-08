@@ -5,7 +5,7 @@ import pytest
 
 from youtube_cli.models import VideoInfo
 from youtube_cli.errors import InvalidInputError
-from youtube_cli.yt_dlp import ResolutionResult, normalize_target, resolve_targets, search
+from youtube_cli.yt_dlp import ResolutionResult, normalize_target, resolve_payload, resolve_targets, search
 
 
 def test_normalize_target_wraps_bare_youtube_id() -> None:
@@ -73,3 +73,18 @@ def test_resolve_targets_expands_playlist(monkeypatch) -> None:
     assert [item.info.video_id for item in result.targets] == ["abc123def45"]
     assert result.targets[0].info.webpage_url == "https://www.youtube.com/watch?v=abc123def45"
     assert "Skipped unavailable playlist entry #2" in result.skipped_messages[0]
+
+
+def test_resolve_payload_handles_single_video() -> None:
+    payload = {
+        "id": "abc123def45",
+        "title": "Demo",
+        "channel": "Channel",
+        "duration": 91,
+        "upload_date": "20260307",
+        "webpage_url": "https://www.youtube.com/watch?v=abc123def45",
+        "extractor_key": "youtube",
+    }
+    result = resolve_payload("https://www.youtube.com/watch?v=abc123def45", payload)
+    assert [item.info.video_id for item in result.targets] == ["abc123def45"]
+    assert result.skipped_messages == []

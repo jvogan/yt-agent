@@ -95,6 +95,17 @@ def _render_info(payload: dict[str, object]) -> None:
     console.print(table)
 
 
+def _render_playlist_summary(payload: dict[str, object], entry_count: int) -> None:
+    table = Table(title="Playlist")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("title", str(payload.get("title") or "Untitled"))
+    table.add_row("channel", str(payload.get("channel") or payload.get("uploader") or "Unknown"))
+    table.add_row("entries", str(entry_count))
+    table.add_row("url", str(payload.get("webpage_url") or payload.get("original_url") or ""))
+    console.print(table)
+
+
 def _render_doctor(settings: Settings) -> bool:
     table = Table(title="Doctor")
     table.add_column("Tool / Path")
@@ -146,6 +157,46 @@ def _download_targets(targets: list[DownloadTarget], settings: Settings) -> tupl
         downloaded += 1
         console.print(f"[green]Saved:[/green] {execution.output_path}")
     return downloaded, skipped, failed
+
+
+def _resolve_download_inputs(
+    inputs: list[str],
+    settings: Settings,
+    *,
+    source_query: str | None = None,
+    select_playlist: bool = False,
+    use_fzf: bool = False,
+) -> tuple[list[DownloadTarget], list[str]]:
+    all_targets: list[DownloadTarget] = []
+    skipped_messages: list[str] = []
+    for user_input in inputs:
+        payload = yt_dlp.fetch_info(user_input)
+        resolution = yt_dlp.resolve_payload(user_input, payload, source_query=source_query)
+        skipped_messages.extend(resolution.skipped_messages)
+
+        if not isinstance(payload.get("entries"), list) or not select_playlist:
+            all_targets.extend(resolution.targets)
+            continue
+
+        if not resolution.targets:
+            console.print(f"[yellow]No downloadable entries found in playlist:[/yellow] {user_input}")
+            continue
+
+        _render_playlist_summary(payload, len(resolution.targets))
+        _render_results([target.info for target in resolution.targets])
+        selected_infos = select_results(
+            [target.info for target in resolution.targets],
+            prefer_fzf=use_fzf,
+            configured_selector=settings.selector,
+        )
+        if not selected_infos:
+            console.print(f"[yellow]No playlist selection made:[/yellow] {payload.get('title') or user_input}")
+            continue
+
+        selected_ids = {item.video_id for item in selected_infos}
+        all_targets.extend([target for target in resolution.targets if target.info.video_id in selected_ids])
+
+    return all_targets, skipped_messages
 
 
 @app.command()
@@ -211,6 +262,7 @@ def pick(
 @app.command()
 def info(
     target: str,
+    entries: bool = typer.Option(False, "--entries", help="For playlists, show individual entries."),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
 ) -> None:
     """Print normalized metadata for a target without downloading."""
@@ -219,6 +271,12 @@ def info(
         _ = _load_settings(config)
         payload = yt_dlp.fetch_info(target)
         _render_info(payload)
+        if entries and isinstance(payload.get("entries"), list):
+            resolution = yt_dlp.resolve_payload(target, payload)
+            for message in resolution.skipped_messages:
+                console.print(f"[yellow]{message}[/yellow]")
+            if resolution.targets:
+                _render_results([item.info for item in resolution.targets])
 
     _run_guarded(_command)
 
@@ -226,6 +284,12 @@ def info(
 @app.command()
 def download(
     targets: list[str] = typer.Argument(..., help="Video URLs, playlist URLs, or YouTube video ids."),
+    select_playlist: bool = typer.Option(
+        False,
+        "--select-playlist",
+        help="For playlist URLs, interactively choose which entries to download.",
+    ),
+    use_fzf: bool = typer.Option(False, "--fzf", help="Use fzf for playlist entry selection."),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
 ) -> None:
     """Download videos into the organized local library."""
@@ -233,13 +297,18 @@ def download(
     def _command() -> None:
         settings = _load_settings(config)
         _prepare_storage(settings)
-        resolution = yt_dlp.resolve_targets(targets)
-        for message in resolution.skipped_messages:
+        resolved_targets, skipped_messages = _resolve_download_inputs(
+            targets,
+            settings,
+            select_playlist=select_playlist,
+            use_fzf=use_fzf,
+        )
+        for message in skipped_messages:
             console.print(f"[yellow]{message}[/yellow]")
-        if not resolution.targets:
+        if not resolved_targets:
             console.print("Nothing to download.")
             return
-        downloaded, skipped, failed = _download_targets(resolution.targets, settings)
+        downloaded, skipped, failed = _download_targets(resolved_targets, settings)
         console.print(f"Completed: {downloaded} downloaded, {skipped} skipped, {failed} failed.")
         if failed:
             raise ExternalCommandError(f"{failed} download(s) failed.")

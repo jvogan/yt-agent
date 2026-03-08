@@ -36,7 +36,9 @@ uv run youtube-cli doctor
 uv run youtube-cli search "lofi hip hop"
 uv run youtube-cli pick "documentary clips" --fzf
 uv run youtube-cli info https://www.youtube.com/watch?v=dQw4w9WgXcQ
+uv run youtube-cli info https://www.youtube.com/playlist?list=PL123 --entries
 uv run youtube-cli download https://www.youtube.com/watch?v=dQw4w9WgXcQ
+uv run youtube-cli download https://www.youtube.com/playlist?list=PL123 --select-playlist
 uv run youtube-cli grab "synthwave mix"
 ```
 
