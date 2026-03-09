@@ -1,19 +1,35 @@
 [project]
-name = "youtube-cli"
+name = "yt-agent"
 version = "0.1.0"
-description = "Private terminal-first YouTube search and download workflow built on yt-dlp."
+description = "Agentic YouTube search, download, catalog, and clip tooling built on yt-dlp."
 readme = "README.md"
 requires-python = ">=3.14"
+license = { file = "LICENSE" }
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Multimedia :: Video",
+  "Topic :: Utilities",
+]
 dependencies = [
   "rich>=14.0.0",
+  "textual>=2.1.2",
   "typer>=0.16.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/jvogan/yt-agent"
+Repository = "https://github.com/jvogan/yt-agent"
+Issues = "https://github.com/jvogan/yt-agent/issues"
+
 [project.scripts]
-youtube-cli = "youtube_cli.cli:main"
+yt-agent = "yt_agent.cli:main"
+youtube-cli = "yt_agent.cli:main"
 
 [dependency-groups]
 dev = [
+  "pytest-asyncio>=1.1.0",
   "pytest>=8.4.0",
   "ruff>=0.12.0",
 ]
@@ -23,13 +39,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/youtube_cli"]
+packages = ["src/yt_agent", "src/youtube_cli"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
 target-version = "py314"
-

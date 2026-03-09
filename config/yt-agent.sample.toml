@@ -1,0 +1,14 @@
+download_root = "~/Media/YouTube"
+archive_file = "~/.local/share/yt-agent/archive.txt"
+manifest_file = "~/.local/share/yt-agent/downloads.jsonl"
+catalog_file = "~/.local/share/yt-agent/catalog.sqlite"
+search_limit = 10
+video_format = "bv*+ba/b"
+audio_format = "bestaudio/best"
+default_mode = "video"
+selector = "prompt"
+write_thumbnail = true
+write_description = true
+write_info_json = true
+embed_metadata = true
+embed_thumbnail = false

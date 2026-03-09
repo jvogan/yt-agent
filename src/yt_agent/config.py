@@ -7,15 +7,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from youtube_cli.errors import ConfigError
+from yt_agent.errors import ConfigError
 
 
-DEFAULT_CONFIG_PATH = Path("~/.config/youtube-cli/config.toml").expanduser()
+DEFAULT_CONFIG_PATH = Path("~/.config/yt-agent/config.toml").expanduser()
 DEFAULT_DOWNLOAD_ROOT = Path("~/Media/YouTube").expanduser()
-DEFAULT_ARCHIVE_FILE = Path("~/.local/share/youtube-cli/archive.txt").expanduser()
-DEFAULT_MANIFEST_FILE = Path("~/.local/share/youtube-cli/downloads.jsonl").expanduser()
+DEFAULT_ARCHIVE_FILE = Path("~/.local/share/yt-agent/archive.txt").expanduser()
+DEFAULT_MANIFEST_FILE = Path("~/.local/share/yt-agent/downloads.jsonl").expanduser()
+DEFAULT_CATALOG_FILE = Path("~/.local/share/yt-agent/catalog.sqlite").expanduser()
+DEFAULT_CLIPS_ROOT = (DEFAULT_DOWNLOAD_ROOT / "_clips").expanduser()
 
 ALLOWED_SELECTOR_VALUES = {"prompt", "fzf"}
+ALLOWED_DEFAULT_MODES = {"video"}
 
 
 def _expand_path(value: str | Path) -> Path:
@@ -51,11 +54,14 @@ class Settings:
     download_root: Path = DEFAULT_DOWNLOAD_ROOT
     archive_file: Path = DEFAULT_ARCHIVE_FILE
     manifest_file: Path = DEFAULT_MANIFEST_FILE
+    catalog_file: Path = DEFAULT_CATALOG_FILE
+    clips_root: Path = DEFAULT_CLIPS_ROOT
     search_limit: int = 10
     video_format: str = "bv*+ba/b"
     audio_format: str = "bestaudio/best"
     default_mode: str = "video"
     selector: str = "prompt"
+    subtitle_languages: str = "en.*,en"
     write_thumbnail: bool = True
     write_description: bool = True
     write_info_json: bool = True
@@ -66,6 +72,8 @@ class Settings:
         self.download_root.mkdir(parents=True, exist_ok=True)
         self.archive_file.parent.mkdir(parents=True, exist_ok=True)
         self.manifest_file.parent.mkdir(parents=True, exist_ok=True)
+        self.catalog_file.parent.mkdir(parents=True, exist_ok=True)
+        self.clips_root.mkdir(parents=True, exist_ok=True)
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -85,11 +93,14 @@ def load_settings(config_path: Path | None = None) -> Settings:
         "download_root",
         "archive_file",
         "manifest_file",
+        "catalog_file",
+        "clips_root",
         "search_limit",
         "video_format",
         "audio_format",
         "default_mode",
         "selector",
+        "subtitle_languages",
         "write_thumbnail",
         "write_description",
         "write_info_json",
@@ -105,11 +116,14 @@ def load_settings(config_path: Path | None = None) -> Settings:
         download_root=_expand_path(values.get("download_root", DEFAULT_DOWNLOAD_ROOT)),
         archive_file=_expand_path(values.get("archive_file", DEFAULT_ARCHIVE_FILE)),
         manifest_file=_expand_path(values.get("manifest_file", DEFAULT_MANIFEST_FILE)),
+        catalog_file=_expand_path(values.get("catalog_file", DEFAULT_CATALOG_FILE)),
+        clips_root=_expand_path(values.get("clips_root", DEFAULT_CLIPS_ROOT)),
         search_limit=_int_value(values, "search_limit", 10),
         video_format=_str_value(values, "video_format", "bv*+ba/b"),
         audio_format=_str_value(values, "audio_format", "bestaudio/best"),
         default_mode=_str_value(values, "default_mode", "video"),
         selector=_str_value(values, "selector", "prompt"),
+        subtitle_languages=_str_value(values, "subtitle_languages", "en.*,en"),
         write_thumbnail=_bool_value(values, "write_thumbnail", True),
         write_description=_bool_value(values, "write_description", True),
         write_info_json=_bool_value(values, "write_info_json", True),
@@ -122,7 +136,10 @@ def load_settings(config_path: Path | None = None) -> Settings:
     if settings.selector not in ALLOWED_SELECTOR_VALUES:
         allowed = ", ".join(sorted(ALLOWED_SELECTOR_VALUES))
         raise ConfigError(f"Config key 'selector' must be one of: {allowed}")
-    if settings.default_mode != "video":
-        raise ConfigError("Only 'video' mode is supported in v1.")
+    if settings.default_mode not in ALLOWED_DEFAULT_MODES:
+        allowed = ", ".join(sorted(ALLOWED_DEFAULT_MODES))
+        raise ConfigError(f"Config key 'default_mode' must be one of: {allowed}")
+    if not settings.subtitle_languages.strip():
+        raise ConfigError("Config key 'subtitle_languages' must not be empty.")
 
     return settings

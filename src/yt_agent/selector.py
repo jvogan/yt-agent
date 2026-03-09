@@ -7,8 +7,8 @@ import subprocess
 
 from rich.prompt import Prompt
 
-from youtube_cli.errors import SelectionError
-from youtube_cli.models import VideoInfo
+from yt_agent.errors import SelectionError
+from yt_agent.models import VideoInfo
 
 
 def _format_line(index: int, result: VideoInfo) -> str:

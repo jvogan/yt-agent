@@ -16,37 +16,40 @@ class ExitCode(IntEnum):
     INTERRUPTED = 130
 
 
-class YoutubeCliError(Exception):
+class YtAgentError(Exception):
     """Base application error."""
 
     exit_code = ExitCode.EXTERNAL
 
 
-class DependencyError(YoutubeCliError):
+YoutubeCliError = YtAgentError
+
+
+class DependencyError(YtAgentError):
     """Raised when a required system tool is unavailable."""
 
     exit_code = ExitCode.DEPENDENCY
 
 
-class InvalidInputError(YoutubeCliError):
+class InvalidInputError(YtAgentError):
     """Raised for invalid command input or unsupported metadata."""
 
     exit_code = ExitCode.INPUT
 
 
-class ConfigError(YoutubeCliError):
+class ConfigError(YtAgentError):
     """Raised for invalid configuration."""
 
     exit_code = ExitCode.CONFIG
 
 
-class SelectionError(YoutubeCliError):
+class SelectionError(YtAgentError):
     """Raised for invalid interactive selections."""
 
     exit_code = ExitCode.INPUT
 
 
-class ExternalCommandError(YoutubeCliError):
+class ExternalCommandError(YtAgentError):
     """Raised when an external command fails."""
 
     exit_code = ExitCode.EXTERNAL

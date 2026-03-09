@@ -10,10 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from youtube_cli.config import Settings
-from youtube_cli.errors import DependencyError, ExternalCommandError, InvalidInputError
-from youtube_cli.library import build_output_template
-from youtube_cli.models import DownloadTarget, VideoInfo
+from yt_agent.config import Settings
+from yt_agent.errors import DependencyError, ExternalCommandError, InvalidInputError
+from yt_agent.library import build_output_template, discover_info_json
+from yt_agent.models import DownloadTarget, VideoInfo
 
 YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
@@ -24,6 +24,7 @@ class DownloadExecution:
 
     output_path: Path
     stdout: str
+    info_json_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -160,4 +161,9 @@ def download_target(target: DownloadTarget, settings: Settings) -> DownloadExecu
         args.append("--embed-thumbnail")
 
     args.append(target.info.webpage_url)
-    return _run_download(args)
+    execution = _run_download(args)
+    return DownloadExecution(
+        output_path=execution.output_path,
+        stdout=execution.stdout,
+        info_json_path=discover_info_json(execution.output_path),
+    )

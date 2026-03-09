@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from youtube_cli.models import VideoInfo
+from yt_agent.models import VideoInfo
 
 
 def ensure_archive_file(path: Path) -> None:

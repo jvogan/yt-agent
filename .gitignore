@@ -9,4 +9,8 @@ dist/
 .DS_Store
 coverage.xml
 htmlcov/
-
+output/
+tmp/
+assets/tmp/
+output/
+tmp/

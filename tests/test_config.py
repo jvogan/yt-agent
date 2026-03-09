@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from youtube_cli.config import DEFAULT_ARCHIVE_FILE, DEFAULT_DOWNLOAD_ROOT, load_settings
-from youtube_cli.errors import ConfigError
+from yt_agent.config import DEFAULT_ARCHIVE_FILE, DEFAULT_CATALOG_FILE, DEFAULT_DOWNLOAD_ROOT, load_settings
+from yt_agent.errors import ConfigError
 
 
 def test_load_settings_defaults(tmp_path: Path) -> None:
@@ -12,6 +12,7 @@ def test_load_settings_defaults(tmp_path: Path) -> None:
     assert settings.config_path == config_path
     assert settings.download_root == DEFAULT_DOWNLOAD_ROOT
     assert settings.archive_file == DEFAULT_ARCHIVE_FILE
+    assert settings.catalog_file == DEFAULT_CATALOG_FILE
     assert settings.search_limit == 10
     assert settings.selector == "prompt"
 

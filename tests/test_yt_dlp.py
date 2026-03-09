@@ -3,9 +3,9 @@ import subprocess
 
 import pytest
 
-from youtube_cli.models import VideoInfo
-from youtube_cli.errors import InvalidInputError
-from youtube_cli.yt_dlp import ResolutionResult, normalize_target, resolve_payload, resolve_targets, search
+from yt_agent.errors import InvalidInputError
+from yt_agent.models import VideoInfo
+from yt_agent.yt_dlp import ResolutionResult, normalize_target, resolve_payload, resolve_targets, search
 
 
 def test_normalize_target_wraps_bare_youtube_id() -> None:
@@ -35,8 +35,8 @@ def test_search_parses_dump_single_json(monkeypatch) -> None:
     def fake_run(args, text, capture_output, check):
         return subprocess.CompletedProcess(args, 0, stdout=json.dumps(payload), stderr="")
 
-    monkeypatch.setattr("youtube_cli.yt_dlp.shutil.which", lambda _: "/opt/homebrew/bin/yt-dlp")
-    monkeypatch.setattr("youtube_cli.yt_dlp.subprocess.run", fake_run)
+    monkeypatch.setattr("yt_agent.yt_dlp.shutil.which", lambda _: "/opt/homebrew/bin/yt-dlp")
+    monkeypatch.setattr("yt_agent.yt_dlp.subprocess.run", fake_run)
     results = search("demo", limit=5)
     assert results == [
         VideoInfo(
@@ -67,7 +67,7 @@ def test_resolve_targets_expands_playlist(monkeypatch) -> None:
             None,
         ],
     }
-    monkeypatch.setattr("youtube_cli.yt_dlp.fetch_info", lambda target: payload)
+    monkeypatch.setattr("yt_agent.yt_dlp.fetch_info", lambda target: payload)
     result = resolve_targets(["https://www.youtube.com/playlist?list=PL123"])
     assert isinstance(result, ResolutionResult)
     assert [item.info.video_id for item in result.targets] == ["abc123def45"]
