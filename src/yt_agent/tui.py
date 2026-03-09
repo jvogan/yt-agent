@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -214,7 +216,9 @@ class YtAgentTui(App[None]):
         if not path.exists():
             self.notify("Local media path is missing on disk.", severity="warning")
             return
-        subprocess.Popen(["open", str(path)])
+        if not open_with_system_default(path):
+            self.notify("Opening local media is only supported on macOS, Linux, and Windows.", severity="warning")
+            return
         self.notify(f"Opened {path.name}")
 
     def action_clip_action(self) -> None:
@@ -231,3 +235,16 @@ def launch_tui(settings: Settings) -> None:
     store = CatalogStore(settings.catalog_file)
     app = YtAgentTui(store)
     app.run()
+
+
+def open_with_system_default(path: Path) -> bool:
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+        return True
+    if sys.platform.startswith("linux"):
+        subprocess.Popen(["xdg-open", str(path)])
+        return True
+    if sys.platform == "win32":
+        os.startfile(str(path))  # type: ignore[attr-defined]
+        return True
+    return False

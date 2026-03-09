@@ -121,6 +121,19 @@ class VideoInfo:
     def display_duration(self) -> str:
         return format_seconds(self.duration_seconds)
 
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "video_id": self.video_id,
+            "title": self.title,
+            "channel": self.channel,
+            "upload_date": self.upload_date,
+            "duration_seconds": self.duration_seconds,
+            "display_duration": self.display_duration,
+            "extractor_key": self.extractor_key,
+            "webpage_url": self.webpage_url,
+            "original_url": self.original_url,
+        }
+
 
 @dataclass(frozen=True)
 class DownloadTarget:
@@ -207,6 +220,15 @@ class ChapterEntry:
     def display_range(self) -> str:
         return f"{format_seconds(self.start_seconds)} - {format_seconds(self.end_seconds)}"
 
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "position": self.position,
+            "title": self.title,
+            "start_seconds": self.start_seconds,
+            "end_seconds": self.end_seconds,
+            "display_range": self.display_range,
+        }
+
 
 @dataclass(frozen=True)
 class SubtitleTrack:
@@ -217,6 +239,15 @@ class SubtitleTrack:
     is_auto: bool
     format: str
     file_path: Path
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "lang": self.lang,
+            "source": self.source,
+            "is_auto": self.is_auto,
+            "format": self.format,
+            "file_path": str(self.file_path),
+        }
 
 
 @dataclass(frozen=True)
@@ -231,6 +262,15 @@ class TranscriptSegment:
     @property
     def display_range(self) -> str:
         return f"{format_seconds(self.start_seconds)} - {format_seconds(self.end_seconds)}"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "segment_index": self.segment_index,
+            "start_seconds": self.start_seconds,
+            "end_seconds": self.end_seconds,
+            "display_range": self.display_range,
+            "text": self.text,
+        }
 
 
 @dataclass(frozen=True)
@@ -269,6 +309,27 @@ class CatalogVideo:
     def transcript_count(self) -> int:
         return self.transcript_segment_count
 
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "video_id": self.video_id,
+            "title": self.title,
+            "channel": self.channel,
+            "upload_date": self.upload_date,
+            "duration_seconds": self.duration_seconds,
+            "display_duration": self.display_duration,
+            "extractor_key": self.extractor_key,
+            "webpage_url": self.webpage_url,
+            "requested_input": self.requested_input,
+            "source_query": self.source_query,
+            "output_path": str(self.output_path) if self.output_path else None,
+            "info_json_path": str(self.info_json_path) if self.info_json_path else None,
+            "downloaded_at": self.downloaded_at,
+            "chapter_count": self.chapter_count,
+            "transcript_segment_count": self.transcript_segment_count,
+            "playlist_count": self.playlist_count,
+            "has_local_media": self.has_local_media,
+        }
+
 
 @dataclass(frozen=True)
 class ClipSearchHit:
@@ -290,6 +351,23 @@ class ClipSearchHit:
     @property
     def display_range(self) -> str:
         return f"{format_seconds(self.start_seconds)} - {format_seconds(self.end_seconds)}"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "result_id": self.result_id,
+            "source": self.source,
+            "video_id": self.video_id,
+            "title": self.title,
+            "channel": self.channel,
+            "webpage_url": self.webpage_url,
+            "start_seconds": self.start_seconds,
+            "end_seconds": self.end_seconds,
+            "display_range": self.display_range,
+            "score": self.score,
+            "match_text": self.match_text,
+            "context": self.context,
+            "output_path": str(self.output_path) if self.output_path else None,
+        }
 
 
 @dataclass(frozen=True)

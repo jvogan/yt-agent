@@ -3,7 +3,7 @@
 Generated with the `imagegen` skill via:
 
 ```bash
-uv run python /Users/jacobvogan/.codex/skills/imagegen/scripts/image_gen.py generate \
+uv run python path/to/image_gen.py generate \
   --model gpt-image-1.5 \
   --size 1536x1024 \
   --quality high \

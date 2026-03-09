@@ -11,6 +11,7 @@
 
 ## Next likely steps
 
+- Better agent-facing recipes and scriptability polish on top of the CLI backend
 - Better clip result ranking and transcript context windows
 - Chapter-aware clip labels and export presets
 - Background indexing and download queues
@@ -21,5 +22,6 @@
 ## Explicitly out of scope for this release
 
 - Browser automation against YouTube
+- Skill-first packaging as the primary product surface
 - Multi-user sync or remote shared catalogs
 - AI ranking as the default clip-search path

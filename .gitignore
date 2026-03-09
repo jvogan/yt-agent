@@ -1,6 +1,7 @@
 .pytest_cache/
 .ruff_cache/
 .venv/
+.tmp-py311/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -12,5 +13,11 @@ htmlcov/
 output/
 tmp/
 assets/tmp/
-output/
-tmp/
+.env
+.env.*
+cookies.txt
+cookies*.txt
+*.sqlite
+*.sqlite3
+*.db
+*.jsonl

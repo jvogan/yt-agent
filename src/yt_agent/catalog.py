@@ -423,6 +423,31 @@ class CatalogStore:
             for row in rows
         ]
 
+    def library_stats(self) -> dict[str, int]:
+        with self.connect() as conn:
+            conn.executescript(SCHEMA)
+            row = conn.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM videos) AS videos,
+                    (SELECT COUNT(*) FROM videos WHERE output_path IS NOT NULL) AS local_media,
+                    (SELECT COUNT(*) FROM playlists) AS playlists,
+                    (SELECT COUNT(*) FROM chapters) AS chapters,
+                    (SELECT COUNT(*) FROM subtitle_tracks) AS subtitle_tracks,
+                    (SELECT COUNT(*) FROM transcript_segments) AS transcript_segments,
+                    (SELECT COUNT(DISTINCT channel) FROM videos WHERE channel <> '') AS channels
+                """
+            ).fetchone()
+        return {
+            "videos": int(row["videos"] or 0),
+            "local_media": int(row["local_media"] or 0),
+            "playlists": int(row["playlists"] or 0),
+            "chapters": int(row["chapters"] or 0),
+            "subtitle_tracks": int(row["subtitle_tracks"] or 0),
+            "transcript_segments": int(row["transcript_segments"] or 0),
+            "channels": int(row["channels"] or 0),
+        }
+
     def get_video_chapters(self, video_id: str) -> list[ChapterEntry]:
         return self.video_chapters(video_id)
 

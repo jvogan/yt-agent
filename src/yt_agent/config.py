@@ -17,6 +17,24 @@ DEFAULT_MANIFEST_FILE = Path("~/.local/share/yt-agent/downloads.jsonl").expandus
 DEFAULT_CATALOG_FILE = Path("~/.local/share/yt-agent/catalog.sqlite").expanduser()
 DEFAULT_CLIPS_ROOT = (DEFAULT_DOWNLOAD_ROOT / "_clips").expanduser()
 
+DEFAULT_CONFIG_TEXT = """download_root = "~/Media/YouTube"
+archive_file = "~/.local/share/yt-agent/archive.txt"
+manifest_file = "~/.local/share/yt-agent/downloads.jsonl"
+catalog_file = "~/.local/share/yt-agent/catalog.sqlite"
+clips_root = "~/Media/YouTube/_clips"
+search_limit = 10
+video_format = "bv*+ba/b"
+audio_format = "bestaudio/best"
+default_mode = "video"
+selector = "prompt"
+subtitle_languages = "en.*,en"
+write_thumbnail = true
+write_description = true
+write_info_json = true
+embed_metadata = true
+embed_thumbnail = false
+"""
+
 ALLOWED_SELECTOR_VALUES = {"prompt", "fzf"}
 ALLOWED_DEFAULT_MODES = {"video"}
 
@@ -143,3 +161,9 @@ def load_settings(config_path: Path | None = None) -> Settings:
         raise ConfigError("Config key 'subtitle_languages' must not be empty.")
 
     return settings
+
+
+def render_default_config() -> str:
+    """Return the canonical starter config content."""
+
+    return DEFAULT_CONFIG_TEXT

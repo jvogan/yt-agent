@@ -9,10 +9,23 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
     steps:
       - uses: actions/checkout@v4
       - name: Hygiene
+        shell: bash
         run: |
           local_part="jacobvogan"
           domain_part="gmail.com"
@@ -22,9 +35,15 @@ jobs:
             echo "Tracked files must not contain the blocked personal email address."
             exit 1
           fi
+          blocked_files="$(git ls-files | grep -E '(^|/)\.env(\..+)?$|(^|/)cookies[^/]*\.txt$|\.sqlite3?$|\.db$|\.jsonl$' || true)"
+          if [ -n "$blocked_files" ]; then
+            echo "Tracked files must not include local state or secret-looking artifacts:"
+            echo "$blocked_files"
+            exit 1
+          fi
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.14"
+          python-version: ${{ matrix.python-version }}
       - name: Install uv
         uses: astral-sh/setup-uv@v5
       - name: Sync
@@ -35,5 +54,24 @@ jobs:
         run: uv run pytest
       - name: CLI Smoke
         run: |
+          uv run yt-agent --version
           uv run yt-agent --help
           uv run youtube-cli --help
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Build distributions
+        run: uv build
+      - name: Check distributions
+        run: uv run --with twine twine check dist/*
+      - name: Install smoke
+        run: |
+          uv tool run --from . yt-agent --help
+          uv tool run --from . youtube-cli --help

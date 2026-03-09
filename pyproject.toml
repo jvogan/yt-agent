@@ -1,13 +1,17 @@
 [project]
 name = "yt-agent"
-version = "0.1.0"
-description = "Agentic YouTube search, download, catalog, and clip tooling built on yt-dlp."
+version = "0.2.0"
+description = "Terminal-first YouTube search, download, catalog, and clip tooling built on yt-dlp."
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 license = { file = "LICENSE" }
+keywords = ["youtube", "cli", "yt-dlp", "clips", "transcripts", "textual"]
 classifiers = [
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
   "Topic :: Multimedia :: Video",
   "Topic :: Utilities",
@@ -22,6 +26,8 @@ dependencies = [
 Homepage = "https://github.com/jvogan/yt-agent"
 Repository = "https://github.com/jvogan/yt-agent"
 Issues = "https://github.com/jvogan/yt-agent/issues"
+Documentation = "https://github.com/jvogan/yt-agent/tree/main/docs"
+Changelog = "https://github.com/jvogan/yt-agent/blob/main/CHANGELOG.md"
 
 [project.scripts]
 yt-agent = "yt_agent.cli:main"
@@ -48,4 +54,4 @@ asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
-target-version = "py314"
+target-version = "py311"

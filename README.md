@@ -2,27 +2,87 @@
 
 ![yt-agent hero](assets/brand/yt-agent-hero.png)
 
-`yt-agent` is a terminal-first YouTube workflow for search, organized downloads, local cataloging, transcript and chapter search, and deterministic clip extraction.
+`yt-agent` is a terminal-first CLI for YouTube search, organized downloads, local cataloging, transcript and chapter search, and deterministic clip extraction.
 
-It is built on `yt-dlp`, local sidecar files, SQLite FTS, and a small Textual TUI.
+It is built on `yt-dlp`, local sidecar files, SQLite FTS, and a small Textual catalog browser. It works well for direct human use in the terminal and for coding agents that need structured, scriptable output.
 
-`youtube-cli` is still shipped as a temporary alias for one transition release.
+`youtube-cli` is still shipped as a transitional alias during the `0.2.x` release line. It is planned for removal in the next minor release after deprecation is documented.
 
-## Public-use note
+## Responsible Use
 
-Use this tool responsibly. You are responsible for complying with platform terms, copyright, licenses, and any local laws that apply to the media you search, download, index, or clip.
+`yt-agent` is not affiliated with YouTube or Google.
 
-## Features
+You are responsible for complying with platform terms, copyright, licenses, permissions, and local law when you search, download, index, or clip media. Do not commit cookies, exported browser sessions, downloaded media, or private subtitle/data caches to this repo.
 
-- Search YouTube from the terminal via `yt-dlp`
-- Interactively pick results with prompts and optional `fzf`
-- Download whole videos or playlist selections into an organized local library
-- Skip duplicates via a persistent `yt-dlp` archive file
-- Append a JSONL manifest for every successful download
-- Index downloads and remote targets into a local SQLite catalog
-- Search native chapters and subtitle transcripts with FTS5
-- Extract clips from local media with `ffmpeg`, with remote fallback when needed
-- Browse the local catalog in a read-mostly Textual TUI
+## Three Promises
+
+- Search and download media from the terminal with organized output and duplicate avoidance.
+- Build a local catalog that supports transcript and chapter search.
+- Extract deterministic clips from local media, with remote fallback when needed.
+
+## Quickstart
+
+Install the runtime tools you want, then install `yt-agent` from the repo:
+
+```bash
+brew install yt-dlp ffmpeg fzf
+uv tool install git+https://github.com/jvogan/yt-agent
+yt-agent doctor
+```
+
+Linux users can use `python3 -m pip install -U yt-dlp` and `sudo apt-get install -y ffmpeg fzf`.
+
+If you prefer `pipx`:
+
+```bash
+pipx install git+https://github.com/jvogan/yt-agent
+yt-agent doctor
+```
+
+First-run setup:
+
+```bash
+yt-agent config init
+yt-agent config path
+```
+
+More install detail is in [docs/getting-started.md](docs/getting-started.md).
+
+## Golden Paths
+
+### 1. Search and download one video
+
+```bash
+yt-agent search "lofi hip hop" --limit 5
+yt-agent grab "lofi hip hop" --select 1
+```
+
+### 2. Curate a playlist before download
+
+```bash
+yt-agent info "https://www.youtube.com/playlist?list=PL123" --entries
+yt-agent download "https://www.youtube.com/playlist?list=PL123" --select 1,3
+```
+
+### 3. Index local media and cut a clip
+
+```bash
+yt-agent index refresh
+yt-agent clips search "chorus drop" --source all
+yt-agent clips grab transcript:12 --padding-before 2 --padding-after 2
+```
+
+## Agent-Friendly Surface
+
+`yt-agent` is a CLI first, not a skill package, but it is designed to work cleanly with coding agents.
+
+- Use `--output table|json|plain` on read-oriented commands.
+- Use `--select 1,3` to bypass interactive prompts for search and playlist selection.
+- Use `yt-agent library stats --output json` for a quick local catalog summary.
+- Stable exit codes are documented and preserved for scripting.
+- `youtube-cli` remains available as a transitional alias in `0.2.x`.
+
+Agent recipes and copy-paste prompts live in [docs/agent-workflows.md](docs/agent-workflows.md).
 
 ## Screens
 
@@ -32,50 +92,40 @@ Use this tool responsibly. You are responsible for complying with platform terms
 
 ![TUI screenshot](assets/screenshots/tui.png)
 
-Additional docs assets are in [`assets/screenshots/`](assets/screenshots/) and [`assets/brand/`](assets/brand/).
+The TUI is a read-mostly catalog browser today. It is useful for browsing, inspecting metadata, and opening local media, but it is not positioned as a full interactive media workstation yet.
 
-## Runtime requirements
+## Support Matrix
 
-- Python 3.14+
-- `uv`
-- `yt-dlp`
+- macOS: first-class
+- Linux: first-class
+- Windows: experimental
+- `yt-dlp`: required
+- `ffmpeg`: required for local clip extraction and some post-processing
+- `fzf`: optional for terminal multi-select
+- `mpv`: optional and reserved for future preview features
 
-Optional tools:
-
-- `ffmpeg` for muxing, post-processing, and local clip extraction
-- `fzf` for interactive multi-select
-- `mpv` reserved for future preview support
-
-## Install
+## Command Examples
 
 ```bash
-uv sync --dev
-uv run yt-agent doctor
+yt-agent doctor
+yt-agent search "documentary clips" --output json
+yt-agent pick "documentary clips" --select 2
+yt-agent info "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+yt-agent info "https://www.youtube.com/playlist?list=PL123" --entries --output plain
+yt-agent download "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+yt-agent download "https://www.youtube.com/playlist?list=PL123" --select 1,3
+yt-agent index refresh
+yt-agent index add "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+yt-agent clips search "chorus drop" --source all --output json
+yt-agent clips show transcript:12 --output plain
+yt-agent library list --output plain
+yt-agent library search "ambient mix" --output json
+yt-agent library show dQw4w9WgXcQ
+yt-agent library stats
+yt-agent tui
 ```
 
-## Commands
-
-```bash
-uv run yt-agent doctor
-uv run yt-agent search "lofi hip hop"
-uv run yt-agent pick "documentary clips" --fzf
-uv run yt-agent grab "synthwave mix"
-uv run yt-agent info https://www.youtube.com/watch?v=dQw4w9WgXcQ
-uv run yt-agent info https://www.youtube.com/playlist?list=PL123 --entries
-uv run yt-agent download https://www.youtube.com/watch?v=dQw4w9WgXcQ
-uv run yt-agent download https://www.youtube.com/playlist?list=PL123 --select-playlist
-uv run yt-agent index refresh
-uv run yt-agent index add https://www.youtube.com/watch?v=dQw4w9WgXcQ
-uv run yt-agent clips search "chorus drop" --source all
-uv run yt-agent clips show transcript:12
-uv run yt-agent clips grab transcript:12 --padding-before 2 --padding-after 2
-uv run yt-agent library list
-uv run yt-agent library search "ambient mix"
-uv run yt-agent library show dQw4w9WgXcQ
-uv run yt-agent tui
-```
-
-## Default paths
+## What Gets Stored Locally
 
 - Config: `~/.config/yt-agent/config.toml`
 - Archive: `~/.local/share/yt-agent/archive.txt`
@@ -96,15 +146,17 @@ Clips are organized as:
 <clips_root>/<channel>/<title> [<video_id>] <start-end> <label>.<ext>
 ```
 
-## Sample config
-
-See [`config/config.sample.toml`](config/config.sample.toml).
+More detail is in [docs/concepts.md](docs/concepts.md).
 
 ## Docs
 
-- [`docs/architecture.md`](docs/architecture.md)
-- [`docs/workflow.md`](docs/workflow.md)
-- [`docs/roadmap.md`](docs/roadmap.md)
+- [Getting Started](docs/getting-started.md)
+- [Concepts](docs/concepts.md)
+- [Agent Workflows](docs/agent-workflows.md)
+- [Architecture](docs/architecture.md)
+- [Workflow](docs/workflow.md)
+- [Roadmap](docs/roadmap.md)
+- [Release Checklist](docs/release-checklist.md)
 
 ## Development
 
@@ -112,4 +164,7 @@ See [`config/config.sample.toml`](config/config.sample.toml).
 uv sync --dev
 uv run ruff check .
 uv run pytest
+uv build
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution expectations and [THIRD_PARTY.md](THIRD_PARTY.md) for upstream acknowledgements.

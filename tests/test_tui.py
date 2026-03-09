@@ -6,7 +6,7 @@ import pytest
 from textual.widgets import DataTable
 
 from yt_agent.models import CatalogVideo, ChapterEntry, SubtitleTrack, TranscriptSegment
-from yt_agent.tui import YtAgentTui
+from yt_agent.tui import YtAgentTui, open_with_system_default
 
 
 @dataclass
@@ -77,3 +77,22 @@ async def test_tui_renders_catalog_data() -> None:
         assert app.selected_video_id == "abc123def45"
         await pilot.press("r")
         assert table.row_count == 1
+
+
+def test_open_with_system_default_returns_false_on_unsupported_platform(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("yt_agent.tui.sys.platform", "plan9")
+    assert open_with_system_default(tmp_path / "demo.mp4") is False
+
+
+def test_open_with_system_default_uses_linux_launcher(monkeypatch, tmp_path: Path) -> None:
+    launched: list[list[str]] = []
+
+    def fake_popen(args):
+        launched.append(args)
+        return None
+
+    monkeypatch.setattr("yt_agent.tui.sys.platform", "linux")
+    monkeypatch.setattr("yt_agent.tui.subprocess.Popen", fake_popen)
+    path = tmp_path / "demo.mp4"
+    assert open_with_system_default(path) is True
+    assert launched == [["xdg-open", str(path)]]

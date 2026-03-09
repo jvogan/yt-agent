@@ -47,4 +47,5 @@ The manifest is append-only audit data. The catalog is the query layer.
 ## UI Strategy
 
 - CLI commands are the stable backend contract.
+- Read-oriented CLI commands support `--output table|json|plain` for human and agent workflows.
 - The Textual TUI is read-mostly in v1 and rides on the same catalog/query layer.
