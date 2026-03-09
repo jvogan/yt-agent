@@ -7,7 +7,7 @@ Use this checklist before the first public release and before each tagged releas
 - Confirm the repo stays private until the `P0` public-readiness work is complete.
 - Confirm `config/config.sample.toml` is the only canonical sample config in the repo.
 - Confirm the repo contains no cookies, exported browser sessions, local media, subtitle caches, or personal state files.
-- Confirm `jacobvogan@gmail.com` does not appear anywhere in tracked files.
+- Confirm the blocked personal email address does not appear anywhere in tracked files.
 - Confirm screenshots and brand assets are intentional public artifacts.
 
 ## Release validation
