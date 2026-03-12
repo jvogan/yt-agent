@@ -1331,7 +1331,8 @@ def test_config_init_requires_force_to_overwrite(settings, monkeypatch, tmp_path
     result = runner.invoke(app, ["config", "init"])
 
     assert result.exit_code == 4
-    assert "Use --force to overwrite" in result.stderr.replace("\n", " ")
+    normalized = " ".join(result.stderr.split())
+    assert "Use --force to overwrite" in normalized
 
 
 def test_config_path_plain_output(settings, monkeypatch) -> None:
