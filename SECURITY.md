@@ -15,6 +15,15 @@ Security-sensitive areas include:
 - unsafe handling of local media and subtitle paths
 - secret leakage in docs, assets, examples, or tests
 
+## Repository Hygiene
+
+The repository CI checks both tracked files and git history for obvious leaks:
+
+- tracked-file hygiene blocks personal email leakage and local state artifacts
+- `gitleaks` scans repository history for hardcoded secrets before changes are merged
+
+If you discover a real leaked credential, rotate it first and avoid posting the secret itself in issues or reports.
+
 ## Expectations for Reports
 
 - include reproduction steps

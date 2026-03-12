@@ -9,18 +9,19 @@ from rich.prompt import Prompt
 
 from yt_agent.errors import SelectionError
 from yt_agent.models import VideoInfo
+from yt_agent.security import sanitize_terminal_text
 
 
 def _format_line(index: int, result: VideoInfo) -> str:
     return "\t".join(
         [
             str(index),
-            result.title,
-            result.channel,
-            result.display_duration,
-            result.upload_date or "undated",
-            result.video_id,
-            result.webpage_url,
+            sanitize_terminal_text(result.title),
+            sanitize_terminal_text(result.channel),
+            sanitize_terminal_text(result.display_duration),
+            sanitize_terminal_text(result.upload_date or "undated"),
+            sanitize_terminal_text(result.video_id),
+            sanitize_terminal_text(result.webpage_url),
         ]
     )
 
@@ -56,12 +57,13 @@ def prompt_for_selection(results: list[VideoInfo], *, raw_selection: str | None 
 
 
 def select_with_fzf(results: list[VideoInfo]) -> list[VideoInfo]:
-    if shutil.which("fzf") is None:
+    fzf = shutil.which("fzf")
+    if fzf is None:
         raise SelectionError("fzf is not installed.")
 
     payload = "\n".join(_format_line(index, result) for index, result in enumerate(results, start=1))
     completed = subprocess.run(
-        ["fzf", "--multi", "--with-nth=1,2,3,4,5"],
+        [fzf, "--multi", "--with-nth=1,2,3,4,5"],
         input=payload,
         text=True,
         capture_output=True,
@@ -78,7 +80,9 @@ def select_with_fzf(results: list[VideoInfo]) -> list[VideoInfo]:
     for line in selected_lines:
         first_field = line.split("\t", 1)[0].strip()
         if first_field.isdigit():
-            indexes.append(int(first_field))
+            idx = int(first_field)
+            if 1 <= idx <= len(results):
+                indexes.append(idx)
     if not indexes:
         return []
     return [results[index - 1] for index in indexes]

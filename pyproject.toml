@@ -35,7 +35,9 @@ youtube-cli = "yt_agent.cli:main"
 
 [dependency-groups]
 dev = [
+  "mypy>=1.15.0",
   "pytest-asyncio>=1.1.0",
+  "pytest-cov>=6.0",
   "pytest>=8.4.0",
   "ruff>=0.12.0",
 ]
@@ -51,6 +53,29 @@ packages = ["src/yt_agent", "src/youtube_cli"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+files = ["src/yt_agent"]
+
+[[tool.mypy.overrides]]
+module = ["textual.*"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["yt_agent"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
+exclude_lines = [
+  "pragma: no cover",
+  "if __name__",
+  "if TYPE_CHECKING",
+]
 
 [tool.ruff]
 line-length = 100

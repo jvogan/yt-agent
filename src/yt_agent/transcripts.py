@@ -9,6 +9,7 @@ from typing import Iterable
 
 from yt_agent.errors import ExternalCommandError
 from yt_agent.models import SubtitleTrack, TranscriptSegment
+from yt_agent.security import ensure_private_directory, protect_private_tree
 from yt_agent.yt_dlp import command_path, normalize_target
 
 TIMECODE_RE = re.compile(
@@ -127,7 +128,7 @@ def fetch_subtitle_sidecars(
     languages: list[str],
     allow_auto_subs: bool,
 ) -> tuple[Path | None, list[Path]]:
-    destination.mkdir(parents=True, exist_ok=True)
+    ensure_private_directory(destination)
     output_template = destination / "%(id)s.%(ext)s"
 
     def _run(write_auto_subs: bool) -> None:
@@ -151,6 +152,7 @@ def fetch_subtitle_sidecars(
         if completed.returncode != 0:
             stderr = completed.stderr.strip()
             raise ExternalCommandError("yt-dlp failed while fetching subtitles.", stderr=stderr)
+        protect_private_tree(destination)
 
     before = {path.name for path in destination.iterdir()} if destination.exists() else set()
     _run(write_auto_subs=False)
@@ -163,7 +165,7 @@ def fetch_subtitle_sidecars(
     manual_only = after_manual - before
     for path_name in manual_only:
         candidate = destination / path_name
-        if candidate.exists() and candidate.suffix != ".info.json":
+        if candidate.exists() and not candidate.name.endswith(".info.json"):
             candidate.unlink()
 
     _run(write_auto_subs=True)

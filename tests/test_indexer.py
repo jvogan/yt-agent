@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from yt_agent.catalog import CatalogStore
-from yt_agent.indexer import refresh_catalog
+from yt_agent.indexer import _load_info_json, _subtitle_cache_root, index_refresh
 from yt_agent.manifest import append_manifest_record
 from yt_agent.models import DownloadTarget, ManifestRecord, VideoInfo
 
@@ -20,7 +20,7 @@ def _target() -> DownloadTarget:
     return DownloadTarget(original_input=info.webpage_url, info=info)
 
 
-def test_refresh_catalog_backfills_from_manifest_and_sidecars(settings) -> None:
+def test_index_refresh_backfills_from_manifest_and_sidecars(settings) -> None:
     output_path = settings.download_root / "Channel" / "2026-03-07 - Demo Video [abc123def45].mp4"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(b"video")
@@ -48,16 +48,42 @@ def test_refresh_catalog_backfills_from_manifest_and_sidecars(settings) -> None:
     record = ManifestRecord.from_download(_target(), output_path=output_path, info_json_path=info_json_path)
     append_manifest_record(settings.manifest_file, record)
 
-    summary = refresh_catalog(settings)
+    summary = index_refresh(settings)
     assert summary.videos == 1
     assert summary.chapters == 1
     assert summary.transcript_segments == 1
 
-    summary = refresh_catalog(settings)
+    summary = index_refresh(settings)
     assert summary.videos == 1
+    assert summary.chapters == 1
+    assert summary.transcript_segments == 1
 
     store = CatalogStore(settings.catalog_file)
     details = store.get_video_details("abc123def45")
     assert details is not None
     assert len(details["chapters"]) == 1
     assert len(details["subtitle_tracks"]) == 1
+
+
+def test_load_info_json_returns_none_for_corrupt_file(tmp_path: Path) -> None:
+    corrupt = tmp_path / "bad.info.json"
+    corrupt.write_text("{not valid json", encoding="utf-8")
+    assert _load_info_json(corrupt) is None
+
+    assert _load_info_json(None) is None
+    assert _load_info_json(tmp_path / "missing.json") is None
+
+
+def test_subtitle_cache_root_sanitizes_video_id(settings) -> None:
+    info = VideoInfo(
+        video_id="../../escape",
+        title="Demo Video",
+        channel="Channel",
+        upload_date="2026-03-07",
+        duration_seconds=120,
+        extractor_key="generic",
+        webpage_url="https://www.youtube.com/watch?v=abc123def45",
+    )
+    cache_root = _subtitle_cache_root(settings, info)
+    assert cache_root.parent == settings.catalog_file.parent / "subtitle-cache"
+    assert cache_root.name == "escape"

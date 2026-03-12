@@ -9,6 +9,8 @@ from yt_agent.models import VideoInfo, format_seconds
 
 INVALID_PATH_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 MULTISPACE = re.compile(r"\s+")
+INVALID_ID_CHARS = re.compile(r"[^A-Za-z0-9_-]+")
+INVALID_EXT_CHARS = re.compile(r"[^A-Za-z0-9]+")
 
 
 def sanitize_component(value: str | None, fallback: str) -> str:
@@ -25,13 +27,28 @@ def normalized_upload_date(value: str | None) -> str:
     return value or "undated"
 
 
+def sanitize_file_id(value: str | None, fallback: str = "unknown-id") -> str:
+    """Normalize an extractor-provided id for safe filesystem use."""
+
+    candidate = value or ""
+    cleaned = INVALID_ID_CHARS.sub("_", candidate).strip("._-")
+    cleaned = re.sub(r"_+", "_", cleaned)
+    return cleaned[:64] or fallback
+
+
+def sanitize_extension(value: str | None, fallback: str = "mp4") -> str:
+    cleaned = INVALID_EXT_CHARS.sub("", (value or "").casefold())
+    return cleaned[:12] or fallback
+
+
 def build_output_template(download_root: Path, info: VideoInfo) -> Path:
     """Build the yt-dlp output template for a single video."""
 
     channel = sanitize_component(info.channel, "Unknown Channel")
     title = sanitize_component(info.title, "Untitled")
     upload_date = normalized_upload_date(info.upload_date)
-    filename = f"{upload_date} - {title} [{info.video_id}].%(ext)s"
+    file_id = sanitize_file_id(info.video_id)
+    filename = f"{upload_date} - {title} [{file_id}].%(ext)s"
     return download_root / channel / filename
 
 
@@ -49,8 +66,10 @@ def build_clip_output_path(
     channel = sanitize_component(info.channel, "Unknown Channel")
     title = sanitize_component(info.title, "Untitled")
     safe_label = sanitize_component(label, "clip")
+    file_id = sanitize_file_id(info.video_id)
     timerange = f"{format_seconds(start_seconds).replace(':', '-')}_{format_seconds(end_seconds).replace(':', '-')}"
-    filename = f"{title} [{info.video_id}] {timerange} {safe_label}.{extension}"
+    safe_extension = sanitize_extension(extension)
+    filename = f"{title} [{file_id}] {timerange} {safe_label}.{safe_extension}"
     return clip_root / channel / filename
 
 

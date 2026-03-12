@@ -40,7 +40,7 @@ def _format_upload_date(value: Any) -> str | None:
         return None
     if len(value) == 8 and value.isdigit():
         return f"{value[0:4]}-{value[4:6]}-{value[6:8]}"
-    return value
+    return str(value)
 
 
 def _fallback_webpage_url(video_id: str, extractor_key: str) -> str:
@@ -368,15 +368,6 @@ class ClipSearchHit:
             "context": self.context,
             "output_path": str(self.output_path) if self.output_path else None,
         }
-
-
-@dataclass(frozen=True)
-class PlaylistEntryRecord:
-    """A playlist edge stored in the catalog."""
-
-    playlist_id: str
-    video_id: str
-    position: int
 
 
 def chapter_from_payload(index: int, payload: dict[str, Any]) -> ChapterEntry | None:

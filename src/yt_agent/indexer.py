@@ -12,7 +12,7 @@ from yt_agent import yt_dlp
 from yt_agent.catalog import CatalogStore, PlaylistUpsert, VideoUpsert
 from yt_agent.chapters import extract_chapters
 from yt_agent.config import Settings
-from yt_agent.library import discover_info_json, discover_subtitle_files
+from yt_agent.library import discover_info_json, discover_subtitle_files, sanitize_file_id
 from yt_agent.manifest import iter_manifest_records
 from yt_agent.models import ManifestRecord, SubtitleTrack, TranscriptSegment, VideoInfo
 from yt_agent.transcripts import fetch_subtitle_sidecars, infer_subtitle_track, parse_subtitle_file
@@ -46,13 +46,14 @@ def _load_info_json(path: Path | None) -> dict[str, Any] | None:
     if path is None or not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        result: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        return result
     except json.JSONDecodeError:
         return None
 
 
 def _subtitle_cache_root(settings: Settings, info: VideoInfo) -> Path:
-    return settings.catalog_file.parent / "subtitle-cache" / info.video_id
+    return settings.catalog_file.parent / "subtitle-cache" / sanitize_file_id(info.video_id)
 
 
 def _split_languages(settings: Settings, override: str | None = None) -> list[str]:
@@ -296,6 +297,3 @@ def index_target(
         auto_subs=auto_subs,
         lang=lang,
     )
-
-
-refresh_catalog = index_refresh

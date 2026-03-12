@@ -6,11 +6,11 @@ import json
 from pathlib import Path
 
 from yt_agent.models import ManifestRecord
+from yt_agent.security import ensure_private_file
 
 
 def ensure_manifest_file(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.touch(exist_ok=True)
+    ensure_private_file(path)
 
 
 def append_manifest_record(path: Path, record: ManifestRecord) -> None:
@@ -27,6 +27,11 @@ def iter_manifest_records(path: Path) -> list[ManifestRecord]:
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
-        payload = json.loads(line)
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
         rows.append(ManifestRecord.from_dict(payload))
     return rows

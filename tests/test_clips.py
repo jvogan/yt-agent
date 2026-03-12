@@ -87,3 +87,24 @@ def test_extract_clip_uses_remote_fallback(settings, monkeypatch) -> None:
     extraction = extract_clip(settings, "transcript:1", padding_before=1, padding_after=1, mode="fast", prefer_remote=True)
     assert extraction.source == "remote"
     assert extraction.output_path.exists()
+
+
+def test_extract_clip_raises_for_unknown_result_id(settings) -> None:
+    import pytest
+
+    _seed_video(settings, None)
+    with pytest.raises(Exception, match="Unknown clip result"):
+        extract_clip(settings, "chapter:999")
+
+
+def test_extract_clip_raises_for_invalid_mode(settings, monkeypatch) -> None:
+    import pytest
+
+    _seed_video(settings, None)
+    store = CatalogStore(settings.catalog_file)
+    store.replace_chapters(
+        "abc123def45",
+        [ChapterEntry(position=0, title="Intro", start_seconds=1.0, end_seconds=6.0)],
+    )
+    with pytest.raises(Exception, match="mode"):
+        extract_clip(settings, "chapter:1", mode="invalid")

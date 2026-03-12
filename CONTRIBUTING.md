@@ -17,12 +17,33 @@ uv run pytest
 uv build
 ```
 
+## Local Security Checks
+
+Run a full-history secret scan before opening a PR or cutting a release:
+
+```bash
+gitleaks git . --no-banner --redact
+```
+
+If `gitleaks` is not installed locally yet, install it first. On macOS:
+
+```bash
+brew install gitleaks
+```
+
+If you want to inspect the current working tree, including untracked files, run:
+
+```bash
+gitleaks dir . --no-banner --redact
+```
+
 ## Expectations
 
 - Preserve stable exit codes and documented command behavior.
 - Prefer `--output json` support over table scraping when adding new read-oriented features.
 - Keep docs in sync with command behavior.
 - Add or update tests for user-facing changes.
+- Keep the repo free of cookies, local state files, and secret-like artifacts.
 
 ## Pull Requests
 

@@ -2,45 +2,106 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from yt_agent.errors import ConfigError
+from yt_agent.security import ensure_private_directory
 
 
-DEFAULT_CONFIG_PATH = Path("~/.config/yt-agent/config.toml").expanduser()
-DEFAULT_DOWNLOAD_ROOT = Path("~/Media/YouTube").expanduser()
-DEFAULT_ARCHIVE_FILE = Path("~/.local/share/yt-agent/archive.txt").expanduser()
-DEFAULT_MANIFEST_FILE = Path("~/.local/share/yt-agent/downloads.jsonl").expanduser()
-DEFAULT_CATALOG_FILE = Path("~/.local/share/yt-agent/catalog.sqlite").expanduser()
-DEFAULT_CLIPS_ROOT = (DEFAULT_DOWNLOAD_ROOT / "_clips").expanduser()
+@dataclass(frozen=True)
+class DefaultPaths:
+    config_path: Path
+    download_root: Path
+    archive_file: Path
+    manifest_file: Path
+    catalog_file: Path
+    clips_root: Path
 
-DEFAULT_CONFIG_TEXT = """download_root = "~/Media/YouTube"
-archive_file = "~/.local/share/yt-agent/archive.txt"
-manifest_file = "~/.local/share/yt-agent/downloads.jsonl"
-catalog_file = "~/.local/share/yt-agent/catalog.sqlite"
-clips_root = "~/Media/YouTube/_clips"
-search_limit = 10
-video_format = "bv*+ba/b"
-audio_format = "bestaudio/best"
-default_mode = "video"
-selector = "prompt"
-subtitle_languages = "en.*,en"
-write_thumbnail = true
-write_description = true
-write_info_json = true
-embed_metadata = true
-embed_thumbnail = false
-"""
+
+def _relative_to(path: Path, root: Path) -> Path | None:
+    try:
+        return path.relative_to(root)
+    except ValueError:
+        return None
+
+
+def _default_paths(
+    *,
+    platform: str | None = None,
+    env: Mapping[str, str] | None = None,
+    home: Path | None = None,
+) -> DefaultPaths:
+    current_platform = platform or os.name
+    current_env = env or os.environ
+    current_home = home or Path.home()
+    download_root = current_home / "Media" / "YouTube"
+
+    if current_platform == "nt":
+        appdata_root = Path(current_env.get("APPDATA", current_home / "AppData" / "Roaming"))
+        local_appdata_root = Path(current_env.get("LOCALAPPDATA", appdata_root))
+        state_root = local_appdata_root / "yt-agent"
+        config_path = appdata_root / "yt-agent" / "config.toml"
+    else:
+        state_root = current_home / ".local" / "share" / "yt-agent"
+        config_path = current_home / ".config" / "yt-agent" / "config.toml"
+
+    return DefaultPaths(
+        config_path=config_path,
+        download_root=download_root,
+        archive_file=state_root / "archive.txt",
+        manifest_file=state_root / "downloads.jsonl",
+        catalog_file=state_root / "catalog.sqlite",
+        clips_root=download_root / "_clips",
+    )
+
+
+def _render_path_for_config(
+    path: Path,
+    *,
+    platform: str | None = None,
+    env: Mapping[str, str] | None = None,
+    home: Path | None = None,
+) -> str:
+    current_platform = platform or os.name
+    current_env = env or os.environ
+    current_home = home or Path.home()
+
+    if current_platform == "nt":
+        for env_key in ("LOCALAPPDATA", "APPDATA"):
+            base_raw = current_env.get(env_key)
+            if not base_raw:
+                continue
+            relative = _relative_to(path, Path(base_raw))
+            if relative is not None:
+                suffix = relative.as_posix()
+                return f"%{env_key}%" if not suffix else f"%{env_key}%/{suffix}"
+
+    relative_home = _relative_to(path, current_home)
+    if relative_home is not None:
+        suffix = relative_home.as_posix()
+        return "~" if not suffix else f"~/{suffix}"
+    return str(path)
+
+
+_DEFAULT_PATHS = _default_paths()
+
+DEFAULT_CONFIG_PATH = _DEFAULT_PATHS.config_path
+DEFAULT_DOWNLOAD_ROOT = _DEFAULT_PATHS.download_root
+DEFAULT_ARCHIVE_FILE = _DEFAULT_PATHS.archive_file
+DEFAULT_MANIFEST_FILE = _DEFAULT_PATHS.manifest_file
+DEFAULT_CATALOG_FILE = _DEFAULT_PATHS.catalog_file
+DEFAULT_CLIPS_ROOT = _DEFAULT_PATHS.clips_root
 
 ALLOWED_SELECTOR_VALUES = {"prompt", "fzf"}
-ALLOWED_DEFAULT_MODES = {"video"}
+ALLOWED_DEFAULT_MODES = {"video", "audio"}
 
 
 def _expand_path(value: str | Path) -> Path:
-    return Path(value).expanduser()
+    return Path(os.path.expandvars(str(value))).expanduser()
 
 
 def _require_type(key: str, value: Any, expected: type[Any]) -> Any:
@@ -88,17 +149,18 @@ class Settings:
 
     def ensure_storage_paths(self) -> None:
         self.download_root.mkdir(parents=True, exist_ok=True)
-        self.archive_file.parent.mkdir(parents=True, exist_ok=True)
-        self.manifest_file.parent.mkdir(parents=True, exist_ok=True)
-        self.catalog_file.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(self.archive_file.parent)
+        ensure_private_directory(self.manifest_file.parent)
+        ensure_private_directory(self.catalog_file.parent)
         self.clips_root.mkdir(parents=True, exist_ok=True)
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(self.config_path.parent)
 
 
 def load_settings(config_path: Path | None = None) -> Settings:
     """Load settings from disk, falling back to defaults."""
 
-    resolved_config_path = (config_path or DEFAULT_CONFIG_PATH).expanduser()
+    defaults = _default_paths()
+    resolved_config_path = _expand_path(config_path or defaults.config_path)
     values: dict[str, Any] = {}
     if resolved_config_path.exists():
         with resolved_config_path.open("rb") as handle:
@@ -131,11 +193,11 @@ def load_settings(config_path: Path | None = None) -> Settings:
 
     settings = Settings(
         config_path=resolved_config_path,
-        download_root=_expand_path(values.get("download_root", DEFAULT_DOWNLOAD_ROOT)),
-        archive_file=_expand_path(values.get("archive_file", DEFAULT_ARCHIVE_FILE)),
-        manifest_file=_expand_path(values.get("manifest_file", DEFAULT_MANIFEST_FILE)),
-        catalog_file=_expand_path(values.get("catalog_file", DEFAULT_CATALOG_FILE)),
-        clips_root=_expand_path(values.get("clips_root", DEFAULT_CLIPS_ROOT)),
+        download_root=_expand_path(values.get("download_root", defaults.download_root)),
+        archive_file=_expand_path(values.get("archive_file", defaults.archive_file)),
+        manifest_file=_expand_path(values.get("manifest_file", defaults.manifest_file)),
+        catalog_file=_expand_path(values.get("catalog_file", defaults.catalog_file)),
+        clips_root=_expand_path(values.get("clips_root", defaults.clips_root)),
         search_limit=_int_value(values, "search_limit", 10),
         video_format=_str_value(values, "video_format", "bv*+ba/b"),
         audio_format=_str_value(values, "audio_format", "bestaudio/best"),
@@ -163,7 +225,33 @@ def load_settings(config_path: Path | None = None) -> Settings:
     return settings
 
 
-def render_default_config() -> str:
+def render_default_config(
+    *,
+    platform: str | None = None,
+    env: Mapping[str, str] | None = None,
+    home: Path | None = None,
+) -> str:
     """Return the canonical starter config content."""
 
-    return DEFAULT_CONFIG_TEXT
+    defaults = _default_paths(platform=platform, env=env, home=home)
+    return "\n".join(
+        [
+            f'download_root = "{_render_path_for_config(defaults.download_root, platform=platform, env=env, home=home)}"',
+            f'archive_file = "{_render_path_for_config(defaults.archive_file, platform=platform, env=env, home=home)}"',
+            f'manifest_file = "{_render_path_for_config(defaults.manifest_file, platform=platform, env=env, home=home)}"',
+            f'catalog_file = "{_render_path_for_config(defaults.catalog_file, platform=platform, env=env, home=home)}"',
+            f'clips_root = "{_render_path_for_config(defaults.clips_root, platform=platform, env=env, home=home)}"',
+            'search_limit = 10',
+            'video_format = "bv*+ba/b"',
+            'audio_format = "bestaudio/best"',
+            'default_mode = "video"',
+            'selector = "prompt"',
+            'subtitle_languages = "en.*,en"',
+            'write_thumbnail = true',
+            'write_description = true',
+            'write_info_json = true',
+            'embed_metadata = true',
+            'embed_thumbnail = false',
+            "",
+        ]
+    )

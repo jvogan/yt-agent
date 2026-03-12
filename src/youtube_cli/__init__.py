@@ -19,6 +19,7 @@ for module_name in (
     "library",
     "manifest",
     "models",
+    "security",
     "selector",
     "transcripts",
     "tui",

@@ -8,6 +8,7 @@ Use this checklist before the first public release and before each tagged releas
 - Confirm `config/config.sample.toml` is the only canonical sample config in the repo.
 - Confirm the repo contains no cookies, exported browser sessions, local media, subtitle caches, or personal state files.
 - Confirm the blocked personal email address does not appear anywhere in tracked files.
+- Run `gitleaks git . --no-banner --redact`.
 - Confirm screenshots and brand assets are intentional public artifacts.
 
 ## Release validation
@@ -19,6 +20,7 @@ Use this checklist before the first public release and before each tagged releas
 - Run `uv run --with twine twine check dist/*`.
 - Run `uv tool run --from . yt-agent --help`.
 - Run `uv tool run --from . youtube-cli --help`.
+- Confirm the GitHub Actions `Secret Scan` job passed on the release candidate branch or `main`.
 
 ## Documentation check
 

@@ -6,6 +6,18 @@ The format is inspired by Keep a Changelog, and this project follows pre-1.0 sem
 
 ## [Unreleased]
 
+### Added
+
+- History-level secret scanning in CI with a pinned `gitleaks` CLI install and checksum verification, plus contributor and release-checklist guidance for local secret scans.
+- Audio-only download mode via `--audio` flag on `download` and `grab`, backed by the `audio_format` and `default_mode` config keys.
+- `--fetch-subs` and `--auto-subs` flags on `download` and `grab` to save subtitle files during download.
+- `--from-file FILE` option on `download` for batch URL input from a text file.
+- `yt-agent library channels` to list distinct channels in the catalog.
+- `yt-agent library playlists` to list indexed playlists with video counts.
+- `yt-agent library remove` to delete videos from the catalog by ID.
+- `yt-agent config validate` to check a config file for errors.
+- Timestamped YouTube URLs (`?t=NNN`) in clip search and show output.
+
 ## [0.2.0] - 2026-03-09
 
 ### Added

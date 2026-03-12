@@ -9,6 +9,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from yt_agent.config import Settings
 from yt_agent.errors import DependencyError, ExternalCommandError, InvalidInputError
@@ -16,6 +17,17 @@ from yt_agent.library import build_output_template, discover_info_json
 from yt_agent.models import DownloadTarget, VideoInfo
 
 YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_SUBPROCESS_TIMEOUT_SECONDS = 300  # 5 minutes
+ALLOWED_YOUTUBE_HOSTS = {
+    "youtube.com",
+    "www.youtube.com",
+    "m.youtube.com",
+    "music.youtube.com",
+    "youtu.be",
+    "www.youtu.be",
+    "youtube-nocookie.com",
+    "www.youtube-nocookie.com",
+}
 
 
 @dataclass(frozen=True)
@@ -51,6 +63,10 @@ def normalize_target(value: str) -> str:
     if not stripped:
         raise InvalidInputError("Target cannot be empty.")
     if stripped.startswith(("http://", "https://")):
+        parsed = urlsplit(stripped)
+        host = (parsed.hostname or "").rstrip(".").casefold()
+        if host not in ALLOWED_YOUTUBE_HOSTS and not host.endswith(".youtube.com") and not host.endswith(".youtube-nocookie.com"):
+            raise InvalidInputError("Only YouTube URLs are supported.")
         return stripped
     if YOUTUBE_ID_RE.fullmatch(stripped):
         return f"https://www.youtube.com/watch?v={stripped}"
@@ -58,18 +74,25 @@ def normalize_target(value: str) -> str:
 
 
 def _run_json(args: list[str]) -> dict[str, Any]:
-    completed = subprocess.run(args, text=True, capture_output=True, check=False)
+    try:
+        completed = subprocess.run(args, text=True, capture_output=True, check=False, timeout=_SUBPROCESS_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        raise ExternalCommandError("yt-dlp timed out.") from exc
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
         raise ExternalCommandError("yt-dlp failed while extracting metadata.", stderr=stderr)
     try:
-        return json.loads(completed.stdout)
+        result: dict[str, Any] = json.loads(completed.stdout)
+        return result
     except json.JSONDecodeError as exc:
         raise ExternalCommandError("yt-dlp returned invalid JSON metadata.") from exc
 
 
-def _run_download(args: list[str]) -> DownloadExecution:
-    completed = subprocess.run(args, text=True, capture_output=True, check=False)
+def _run_download(args: list[str]) -> DownloadExecution | None:
+    try:
+        completed = subprocess.run(args, text=True, capture_output=True, check=False, timeout=_SUBPROCESS_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        raise ExternalCommandError("yt-dlp timed out.") from exc
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
         raise ExternalCommandError("yt-dlp download failed.", stderr=stderr)
@@ -77,7 +100,7 @@ def _run_download(args: list[str]) -> DownloadExecution:
     lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
     output_path = next((Path(line) for line in reversed(lines) if not line.startswith("[debug]")), None)
     if output_path is None:
-        raise ExternalCommandError("yt-dlp completed without printing a final output path.")
+        return None  # yt-dlp exited 0 with no output — archive skip
     return DownloadExecution(output_path=output_path, stdout=completed.stdout)
 
 
@@ -132,7 +155,14 @@ def resolve_targets(inputs: list[str], *, source_query: str | None = None) -> Re
     return ResolutionResult(targets=all_targets, skipped_messages=all_skipped_messages)
 
 
-def download_target(target: DownloadTarget, settings: Settings) -> DownloadExecution:
+def download_target(
+    target: DownloadTarget,
+    settings: Settings,
+    *,
+    mode: str = "video",
+    fetch_subs: bool = False,
+    auto_subs: bool = False,
+) -> DownloadExecution | None:
     yt_dlp = command_path()
     output_template = build_output_template(settings.download_root, target.info)
     args = [
@@ -146,8 +176,11 @@ def download_target(target: DownloadTarget, settings: Settings) -> DownloadExecu
         "--download-archive",
         str(settings.archive_file),
         "--format",
-        settings.video_format,
+        settings.audio_format if mode == "audio" else settings.video_format,
     ]
+
+    if mode == "audio":
+        args.extend(["--extract-audio", "--audio-format", "mp3"])
 
     if settings.write_thumbnail:
         args.append("--write-thumbnail")
@@ -160,8 +193,14 @@ def download_target(target: DownloadTarget, settings: Settings) -> DownloadExecu
     if settings.embed_thumbnail:
         args.append("--embed-thumbnail")
 
+    if fetch_subs:
+        args.append("--write-auto-subs" if auto_subs else "--write-subs")
+        args.extend(["--sub-langs", settings.subtitle_languages])
+
     args.append(target.info.webpage_url)
     execution = _run_download(args)
+    if execution is None:
+        return None
     return DownloadExecution(
         output_path=execution.output_path,
         stdout=execution.stdout,

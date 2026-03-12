@@ -3,20 +3,23 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from rich.markup import escape
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal
 from textual.reactive import reactive
 from textual.widgets import DataTable, Footer, Header, Label, ListItem, ListView, Static
 
-from yt_agent.catalog import CatalogStore
+from yt_agent.catalog import CatalogStore, VideoDetails
 from yt_agent.config import Settings
 from yt_agent.models import CatalogVideo
+from yt_agent.security import sanitize_terminal_text
 
 
 class CatalogLike(Protocol):
@@ -32,7 +35,7 @@ class CatalogLike(Protocol):
         has_chapters: bool | None = None,
         limit: int = 50,
     ) -> list[CatalogVideo]: ...
-    def get_video_details(self, video_id: str) -> dict[str, Any] | None: ...
+    def get_video_details(self, video_id: str) -> VideoDetails | None: ...
 
 
 @dataclass(frozen=True)
@@ -111,9 +114,16 @@ class YtAgentTui(App[None]):
         sources = self.query_one("#sources", ListView)
         sources.clear()
         self._source_items = [SourceItem("all", "All Videos")]
-        self._source_items.extend(SourceItem("channel", channel, channel) for channel in self.catalog.list_channels())
+        # Keep raw filter values for queries, but sanitize labels before they reach Textual widgets.
         self._source_items.extend(
-            SourceItem("playlist", playlist["title"], str(playlist["playlist_id"]))
+            SourceItem("channel", sanitize_terminal_text(channel), channel) for channel in self.catalog.list_channels()
+        )
+        self._source_items.extend(
+            SourceItem(
+                "playlist",
+                sanitize_terminal_text(playlist["title"]),
+                str(playlist["playlist_id"]),
+            )
             for playlist in self.catalog.list_playlists()
         )
         for item in self._source_items:
@@ -133,10 +143,10 @@ class YtAgentTui(App[None]):
         table.clear()
         for video in self._videos:
             table.add_row(
-                video.video_id,
-                video.title,
-                video.channel,
-                video.display_duration,
+                sanitize_terminal_text(video.video_id),
+                sanitize_terminal_text(video.title),
+                sanitize_terminal_text(video.channel),
+                sanitize_terminal_text(video.display_duration),
                 str(video.transcript_count),
                 str(video.chapter_count),
                 key=video.video_id,
@@ -162,30 +172,33 @@ class YtAgentTui(App[None]):
         tracks = payload["subtitle_tracks"]
         preview = payload["transcript_preview"]
         lines = [
-            f"[b]{video.title}[/b]",
-            f"Channel: {video.channel}",
-            f"Video ID: {video.video_id}",
-            f"Duration: {video.display_duration}",
-            f"Upload Date: {video.upload_date or 'undated'}",
-            f"Path: {video.file_path or '-'}",
+            f"[b]{escape(sanitize_terminal_text(video.title))}[/b]",
+            f"Channel: {escape(sanitize_terminal_text(video.channel))}",
+            f"Video ID: {escape(sanitize_terminal_text(video.video_id))}",
+            f"Duration: {escape(sanitize_terminal_text(video.display_duration))}",
+            f"Upload Date: {escape(sanitize_terminal_text(video.upload_date or 'undated'))}",
+            f"Path: {escape(sanitize_terminal_text(video.file_path or '-'))}",
             f"Chapters: {len(chapters)}",
             f"Subtitle Tracks: {len(tracks)}",
             "",
         ]
         if chapters:
             lines.append("Chapters:")
-            lines.extend(f"- {chapter.title}" for chapter in chapters[:5])
+            lines.extend(f"- {escape(sanitize_terminal_text(chapter.title))}" for chapter in chapters[:5])
         if preview:
             if chapters:
                 lines.append("")
             lines.append("Transcript Preview:")
-            lines.extend(f"- {segment.text}" for segment in preview[:5])
+            lines.extend(f"- {escape(sanitize_terminal_text(segment.text))}" for segment in preview[:5])
         details.update("\n".join(lines))
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.list_view.id != "sources":
             return
-        item = self._source_items[event.list_view.index]
+        index = event.list_view.index
+        if index is None:
+            return
+        item = self._source_items[index]
         self._apply_source(item)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
@@ -219,16 +232,22 @@ class YtAgentTui(App[None]):
         if not open_with_system_default(path):
             self.notify("Opening local media is only supported on macOS, Linux, and Windows.", severity="warning")
             return
-        self.notify(f"Opened {path.name}")
+        self.notify(f"Opened {sanitize_terminal_text(path.name)}")
 
     def action_clip_action(self) -> None:
         if self.selected_video_id is None:
             self.notify("No video selected.", severity="warning")
             return
-        self.notify("Use `yt-agent clips search` or `yt-agent clips grab` for precise clip extraction.")
+        self.notify(
+            "Run: yt-agent clips search --source transcript 'query'  "
+            f"(video {sanitize_terminal_text(self.selected_video_id)})"
+        )
 
     def action_download_action(self) -> None:
-        self.notify("Use `yt-agent download ...` or `yt-agent grab ...` from the CLI to add media.")
+        if self.selected_video_id is None:
+            self.notify("No video selected.", severity="warning")
+            return
+        self.notify(f"Run: yt-agent download {sanitize_terminal_text(self.selected_video_id)}")
 
 
 def launch_tui(settings: Settings) -> None:
@@ -239,10 +258,16 @@ def launch_tui(settings: Settings) -> None:
 
 def open_with_system_default(path: Path) -> bool:
     if sys.platform == "darwin":
-        subprocess.Popen(["open", str(path)])
+        launcher = shutil.which("open")
+        if launcher is None:
+            return False
+        subprocess.Popen([launcher, str(path)])
         return True
     if sys.platform.startswith("linux"):
-        subprocess.Popen(["xdg-open", str(path)])
+        launcher = shutil.which("xdg-open")
+        if launcher is None:
+            return False
+        subprocess.Popen([launcher, str(path)])
         return True
     if sys.platform == "win32":
         os.startfile(str(path))  # type: ignore[attr-defined]

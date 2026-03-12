@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence, TypedDict
 
 from yt_agent.models import CatalogVideo, ChapterEntry, ClipSearchHit, SubtitleTrack, TranscriptSegment
+from yt_agent.security import ensure_private_file
 
 
 SCHEMA = """
@@ -115,13 +117,42 @@ class PlaylistUpsert:
     position: int | None
 
 
-def _row_to_dict(row: sqlite3.Row) -> dict[str, object]:
+def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {key: row[key] for key in row.keys()}
 
 
+def _row_to_catalog_video(row: sqlite3.Row) -> CatalogVideo:
+    payload = _row_to_dict(row)
+    return CatalogVideo(
+        video_id=str(payload["video_id"]),
+        title=str(payload["title"]),
+        channel=str(payload["channel"]),
+        upload_date=str(payload["upload_date"]) if payload.get("upload_date") is not None else None,
+        duration_seconds=int(payload["duration_seconds"]) if payload.get("duration_seconds") is not None else None,
+        extractor_key=str(payload["extractor_key"]),
+        webpage_url=str(payload["webpage_url"]),
+        requested_input=str(payload["requested_input"]) if payload.get("requested_input") is not None else None,
+        source_query=str(payload["source_query"]) if payload.get("source_query") is not None else None,
+        output_path=Path(str(payload["output_path"])) if payload.get("output_path") else None,
+        info_json_path=Path(str(payload["info_json_path"])) if payload.get("info_json_path") else None,
+        downloaded_at=str(payload["downloaded_at"]) if payload.get("downloaded_at") is not None else None,
+        chapter_count=int(payload.get("chapter_count") or 0),
+        transcript_segment_count=int(payload.get("transcript_segment_count") or 0),
+        playlist_count=int(payload.get("playlist_count") or 0),
+    )
+
+
 def _fts_query(query: str) -> str:
-    tokens = [token for token in query.replace('"', " ").split() if token]
-    return " ".join(f'"{token}"' for token in tokens) if tokens else '""'
+    tokens = [re.sub(r"[^\w\-]", "", token) for token in query.split() if token]
+    tokens = [t for t in tokens if t]
+    return " ".join(f'"{token}"' for token in tokens) if tokens else ""
+
+
+class VideoDetails(TypedDict):
+    video: CatalogVideo
+    chapters: list[ChapterEntry]
+    subtitle_tracks: list[SubtitleTrack]
+    transcript_preview: list[TranscriptSegment]
 
 
 class CatalogStore:
@@ -130,9 +161,14 @@ class CatalogStore:
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    def connect(self) -> sqlite3.Connection:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.path)
+    def connect(self, *, readonly: bool = False) -> sqlite3.Connection:
+        if readonly:
+            if not self.path.exists():
+                raise FileNotFoundError(self.path)
+            conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        else:
+            ensure_private_file(self.path)
+            conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
@@ -146,7 +182,6 @@ class CatalogStore:
 
     def upsert_video(self, payload: VideoUpsert) -> None:
         with self.connect() as conn:
-            conn.executescript(SCHEMA)
             conn.execute(
                 """
                 INSERT INTO videos (
@@ -188,7 +223,6 @@ class CatalogStore:
 
     def replace_chapters(self, video_id: str, chapters: Sequence[ChapterEntry]) -> None:
         with self.connect() as conn:
-            conn.executescript(SCHEMA)
             conn.execute("DELETE FROM chapter_fts WHERE video_id = ?", (video_id,))
             conn.execute("DELETE FROM chapters WHERE video_id = ?", (video_id,))
             for chapter in chapters:
@@ -205,7 +239,7 @@ class CatalogStore:
                         chapter.end_seconds,
                     ),
                 )
-                chapter_id = int(cursor.lastrowid)
+                chapter_id = int(cursor.lastrowid or 0)
                 conn.execute(
                     "INSERT INTO chapter_fts (video_id, chapter_id, title) VALUES (?, ?, ?)",
                     (video_id, chapter_id, chapter.title),
@@ -217,7 +251,6 @@ class CatalogStore:
         tracks: Sequence[tuple[SubtitleTrack, Sequence[TranscriptSegment]]],
     ) -> None:
         with self.connect() as conn:
-            conn.executescript(SCHEMA)
             conn.execute("DELETE FROM transcript_fts WHERE video_id = ?", (video_id,))
             conn.execute("DELETE FROM transcript_segments WHERE video_id = ?", (video_id,))
             conn.execute("DELETE FROM subtitle_tracks WHERE video_id = ?", (video_id,))
@@ -236,7 +269,7 @@ class CatalogStore:
                         str(track.file_path),
                     ),
                 )
-                track_id = int(cursor.lastrowid)
+                track_id = int(cursor.lastrowid or 0)
                 for segment in segments:
                     segment_cursor = conn.execute(
                         """
@@ -254,7 +287,7 @@ class CatalogStore:
                             segment.text,
                         ),
                     )
-                    segment_id = int(segment_cursor.lastrowid)
+                    segment_id = int(segment_cursor.lastrowid or 0)
                     conn.execute(
                         "INSERT INTO transcript_fts (video_id, segment_id, text) VALUES (?, ?, ?)",
                         (video_id, segment_id, segment.text),
@@ -262,7 +295,6 @@ class CatalogStore:
 
     def upsert_playlist_entry(self, playlist: PlaylistUpsert, video_id: str) -> None:
         with self.connect() as conn:
-            conn.executescript(SCHEMA)
             conn.execute(
                 """
                 INSERT INTO playlists (playlist_id, title, channel, webpage_url)
@@ -283,54 +315,36 @@ class CatalogStore:
                 (playlist.playlist_id, video_id, playlist.position),
             )
 
-    def get_video(self, video_id: str) -> CatalogVideo | None:
-        with self.connect() as conn:
-            conn.executescript(SCHEMA)
-            row = conn.execute(
-                """
-                SELECT
-                    v.*,
-                    (SELECT COUNT(*) FROM chapters c WHERE c.video_id = v.video_id) AS chapter_count,
-                    (SELECT COUNT(*) FROM transcript_segments t WHERE t.video_id = v.video_id) AS transcript_segment_count,
-                    (SELECT COUNT(*) FROM playlist_entries p WHERE p.video_id = v.video_id) AS playlist_count
-                FROM videos v
-                WHERE v.video_id = ?
-                """,
-                (video_id,),
-            ).fetchone()
+    def get_video(self, video_id: str, *, readonly: bool = False) -> CatalogVideo | None:
+        try:
+            with self.connect(readonly=readonly) as conn:
+                row = conn.execute(
+                    """
+                    SELECT
+                        v.*,
+                        (SELECT COUNT(*) FROM chapters c WHERE c.video_id = v.video_id) AS chapter_count,
+                        (SELECT COUNT(*) FROM transcript_segments t WHERE t.video_id = v.video_id) AS transcript_segment_count,
+                        (SELECT COUNT(*) FROM playlist_entries p WHERE p.video_id = v.video_id) AS playlist_count
+                    FROM videos v
+                    WHERE v.video_id = ?
+                    """,
+                    (video_id,),
+                ).fetchone()
+        except FileNotFoundError:
+            return None
         if row is None:
             return None
-        payload = _row_to_dict(row)
-        return CatalogVideo(
-            video_id=str(payload["video_id"]),
-            title=str(payload["title"]),
-            channel=str(payload["channel"]),
-            upload_date=payload.get("upload_date"),
-            duration_seconds=payload.get("duration_seconds"),
-            extractor_key=str(payload["extractor_key"]),
-            webpage_url=str(payload["webpage_url"]),
-            requested_input=payload.get("requested_input"),
-            source_query=payload.get("source_query"),
-            output_path=Path(payload["output_path"]) if payload.get("output_path") else None,
-            info_json_path=Path(payload["info_json_path"]) if payload.get("info_json_path") else None,
-            downloaded_at=payload.get("downloaded_at"),
-            chapter_count=int(payload.get("chapter_count") or 0),
-            transcript_segment_count=int(payload.get("transcript_segment_count") or 0),
-            playlist_count=int(payload.get("playlist_count") or 0),
-        )
+        return _row_to_catalog_video(row)
 
     def list_videos(
         self,
         *,
         limit: int = 25,
         channel: str | None = None,
-        playlist: str | None = None,
         playlist_id: str | None = None,
         has_transcript: bool | None = None,
         has_chapters: bool | None = None,
     ) -> list[CatalogVideo]:
-        if playlist_id and not playlist:
-            playlist = playlist_id
         query = """
             SELECT DISTINCT
                 v.*,
@@ -346,9 +360,9 @@ class CatalogStore:
         if channel:
             clauses.append("v.channel = ?")
             params.append(channel)
-        if playlist:
+        if playlist_id:
             clauses.append("(pl.playlist_id = ? OR pl.title = ?)")
-            params.extend([playlist, playlist])
+            params.extend([playlist_id, playlist_id])
         if has_transcript is True:
             clauses.append("EXISTS (SELECT 1 FROM transcript_segments t WHERE t.video_id = v.video_id)")
         if has_transcript is False:
@@ -362,9 +376,8 @@ class CatalogStore:
         query += " ORDER BY COALESCE(v.upload_date, '') DESC, COALESCE(v.downloaded_at, '') DESC LIMIT ?"
         params.append(limit)
         with self.connect() as conn:
-            conn.executescript(SCHEMA)
             rows = conn.execute(query, params).fetchall()
-        return [self.get_video(str(row["video_id"])) for row in rows if row]
+        return [_row_to_catalog_video(row) for row in rows]
 
     def search_videos(
         self,
@@ -372,30 +385,57 @@ class CatalogStore:
         *,
         limit: int = 25,
         channel: str | None = None,
-        playlist: str | None = None,
+        playlist_id: str | None = None,
         has_transcript: bool | None = None,
         has_chapters: bool | None = None,
     ) -> list[CatalogVideo]:
-        base = self.list_videos(
-            limit=max(limit * 4, limit),
-            channel=channel,
-            playlist=playlist,
-            has_transcript=has_transcript,
-            has_chapters=has_chapters,
-        )
-        lowered = query.casefold()
-        filtered = [
-            item
-            for item in base
-            if lowered in item.title.casefold()
-            or lowered in item.channel.casefold()
-            or lowered in item.video_id.casefold()
+        if not query.strip():
+            return self.list_videos(
+                limit=limit,
+                channel=channel,
+                playlist_id=playlist_id,
+                has_transcript=has_transcript,
+                has_chapters=has_chapters,
+            )
+        sql = """
+            SELECT DISTINCT
+                v.*,
+                (SELECT COUNT(*) FROM chapters c WHERE c.video_id = v.video_id) AS chapter_count,
+                (SELECT COUNT(*) FROM transcript_segments t WHERE t.video_id = v.video_id) AS transcript_segment_count,
+                (SELECT COUNT(*) FROM playlist_entries p WHERE p.video_id = v.video_id) AS playlist_count
+            FROM videos v
+            LEFT JOIN playlist_entries pe ON pe.video_id = v.video_id
+            LEFT JOIN playlists pl ON pl.playlist_id = pe.playlist_id
+        """
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like_pattern = f"%{escaped}%"
+        clauses: list[str] = [
+            "(v.title LIKE ? ESCAPE '\\' OR v.channel LIKE ? ESCAPE '\\' OR v.video_id LIKE ? ESCAPE '\\')"
         ]
-        return filtered[:limit]
+        params: list[object] = [like_pattern, like_pattern, like_pattern]
+        if channel:
+            clauses.append("v.channel = ?")
+            params.append(channel)
+        if playlist_id:
+            clauses.append("(pl.playlist_id = ? OR pl.title = ?)")
+            params.extend([playlist_id, playlist_id])
+        if has_transcript is True:
+            clauses.append("EXISTS (SELECT 1 FROM transcript_segments t WHERE t.video_id = v.video_id)")
+        if has_transcript is False:
+            clauses.append("NOT EXISTS (SELECT 1 FROM transcript_segments t WHERE t.video_id = v.video_id)")
+        if has_chapters is True:
+            clauses.append("EXISTS (SELECT 1 FROM chapters c WHERE c.video_id = v.video_id)")
+        if has_chapters is False:
+            clauses.append("NOT EXISTS (SELECT 1 FROM chapters c WHERE c.video_id = v.video_id)")
+        sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY COALESCE(v.upload_date, '') DESC, COALESCE(v.downloaded_at, '') DESC LIMIT ?"
+        params.append(limit)
+        with self.connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_row_to_catalog_video(row) for row in rows]
 
     def list_channels(self) -> list[str]:
         with self.connect() as conn:
-            conn.executescript(SCHEMA)
             rows = conn.execute(
                 "SELECT DISTINCT channel FROM videos WHERE channel <> '' ORDER BY channel COLLATE NOCASE"
             ).fetchall()
@@ -403,7 +443,6 @@ class CatalogStore:
 
     def list_playlists(self) -> list[dict[str, str]]:
         with self.connect() as conn:
-            conn.executescript(SCHEMA)
             rows = conn.execute(
                 """
                 SELECT pl.playlist_id, pl.title, pl.channel, COUNT(pe.video_id) AS entry_count
@@ -425,7 +464,6 @@ class CatalogStore:
 
     def library_stats(self) -> dict[str, int]:
         with self.connect() as conn:
-            conn.executescript(SCHEMA)
             row = conn.execute(
                 """
                 SELECT
@@ -448,12 +486,8 @@ class CatalogStore:
             "channels": int(row["channels"] or 0),
         }
 
-    def get_video_chapters(self, video_id: str) -> list[ChapterEntry]:
-        return self.video_chapters(video_id)
-
     def video_chapters(self, video_id: str) -> list[ChapterEntry]:
         with self.connect() as conn:
-            conn.executescript(SCHEMA)
             rows = conn.execute(
                 """
                 SELECT position, title, start_seconds, end_seconds
@@ -475,7 +509,6 @@ class CatalogStore:
 
     def subtitle_tracks(self, video_id: str) -> list[SubtitleTrack]:
         with self.connect() as conn:
-            conn.executescript(SCHEMA)
             rows = conn.execute(
                 """
                 SELECT lang, source, is_auto, format, file_path
@@ -498,7 +531,6 @@ class CatalogStore:
 
     def transcript_preview(self, video_id: str, *, limit: int = 6) -> list[TranscriptSegment]:
         with self.connect() as conn:
-            conn.executescript(SCHEMA)
             rows = conn.execute(
                 """
                 SELECT segment_index, start_seconds, end_seconds, text
@@ -519,15 +551,70 @@ class CatalogStore:
             for row in rows
         ]
 
-    def get_video_details(self, video_id: str) -> dict[str, object] | None:
-        video = self.get_video(video_id)
-        if video is None:
-            return None
+    def get_video_details(self, video_id: str) -> VideoDetails | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT v.*,
+                    (SELECT COUNT(*) FROM chapters c WHERE c.video_id = v.video_id) AS chapter_count,
+                    (SELECT COUNT(*) FROM transcript_segments t WHERE t.video_id = v.video_id) AS transcript_segment_count,
+                    (SELECT COUNT(*) FROM playlist_entries p WHERE p.video_id = v.video_id) AS playlist_count
+                FROM videos v WHERE v.video_id = ?
+                """,
+                (video_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            video = _row_to_catalog_video(row)
+
+            chapter_rows = conn.execute(
+                "SELECT position, title, start_seconds, end_seconds FROM chapters WHERE video_id = ? ORDER BY position",
+                (video_id,),
+            ).fetchall()
+            chapters = [
+                ChapterEntry(
+                    position=int(r["position"]),
+                    title=str(r["title"]),
+                    start_seconds=float(r["start_seconds"]),
+                    end_seconds=float(r["end_seconds"]) if r["end_seconds"] is not None else None,
+                )
+                for r in chapter_rows
+            ]
+
+            track_rows = conn.execute(
+                "SELECT lang, source, is_auto, format, file_path FROM subtitle_tracks WHERE video_id = ? ORDER BY is_auto, lang",
+                (video_id,),
+            ).fetchall()
+            tracks = [
+                SubtitleTrack(
+                    lang=str(r["lang"]),
+                    source=str(r["source"]),
+                    is_auto=bool(r["is_auto"]),
+                    format=str(r["format"]),
+                    file_path=Path(str(r["file_path"])),
+                )
+                for r in track_rows
+            ]
+
+            seg_rows = conn.execute(
+                "SELECT segment_index, start_seconds, end_seconds, text FROM transcript_segments WHERE video_id = ? ORDER BY segment_index LIMIT 6",
+                (video_id,),
+            ).fetchall()
+            preview = [
+                TranscriptSegment(
+                    segment_index=int(r["segment_index"]),
+                    start_seconds=float(r["start_seconds"]),
+                    end_seconds=float(r["end_seconds"]),
+                    text=str(r["text"]),
+                )
+                for r in seg_rows
+            ]
+
         return {
             "video": video,
-            "chapters": self.video_chapters(video_id),
-            "subtitle_tracks": self.subtitle_tracks(video_id),
-            "transcript_preview": self.transcript_preview(video_id),
+            "chapters": chapters,
+            "subtitle_tracks": tracks,
+            "transcript_preview": preview,
         }
 
     def search_clips(
@@ -542,8 +629,9 @@ class CatalogStore:
         sources = {"chapters", "transcript"} if source == "all" else {source}
         hits: list[ClipSearchHit] = []
         fts_query = _fts_query(query)
+        if not fts_query:
+            return []
         with self.connect() as conn:
-            conn.executescript(SCHEMA)
             if "chapters" in sources:
                 chapter_sql = """
                     SELECT
@@ -611,8 +699,9 @@ class CatalogStore:
                     transcript_sql += " AND v.channel = ?"
                     params.append(channel)
                 if language:
-                    transcript_sql += " AND st.lang LIKE ?"
-                    params.append(language)
+                    escaped_lang = language.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    transcript_sql += " AND st.lang LIKE ? ESCAPE '\\'"
+                    params.append(escaped_lang)
                 transcript_sql += " ORDER BY score, t.start_seconds LIMIT ?"
                 params.append(limit)
                 for row in conn.execute(transcript_sql, params):
@@ -635,14 +724,17 @@ class CatalogStore:
         hits.sort(key=lambda item: (item.score, item.source, item.start_seconds))
         return hits[:limit]
 
-    def get_clip_hit(self, result_id: str) -> ClipSearchHit | None:
+    def get_clip_hit(self, result_id: str, *, readonly: bool = False) -> ClipSearchHit | None:
         if ":" not in result_id:
             return None
         source, raw_id = result_id.split(":", 1)
         if not raw_id.isdigit():
             return None
-        with self.connect() as conn:
-            conn.executescript(SCHEMA)
+        try:
+            conn_manager = self.connect(readonly=readonly)
+        except FileNotFoundError:
+            return None
+        with conn_manager as conn:
             if source == "chapter":
                 row = conn.execute(
                     """
@@ -727,9 +819,15 @@ class CatalogStore:
                 )
         return None
 
+    def delete_video(self, video_id: str) -> bool:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM chapter_fts WHERE video_id = ?", (video_id,))
+            conn.execute("DELETE FROM transcript_fts WHERE video_id = ?", (video_id,))
+            cursor = conn.execute("DELETE FROM videos WHERE video_id = ?", (video_id,))
+            return cursor.rowcount > 0
+
     def clear(self) -> None:
         with self.connect() as conn:
-            conn.executescript(SCHEMA)
             conn.execute("DELETE FROM chapter_fts")
             conn.execute("DELETE FROM transcript_fts")
             conn.execute("DELETE FROM playlist_entries")
@@ -738,6 +836,3 @@ class CatalogStore:
             conn.execute("DELETE FROM subtitle_tracks")
             conn.execute("DELETE FROM chapters")
             conn.execute("DELETE FROM videos")
-
-
-Catalog = CatalogStore

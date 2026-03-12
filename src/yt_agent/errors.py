@@ -13,6 +13,8 @@ class ExitCode(IntEnum):
     INPUT = 4
     CONFIG = 5
     EXTERNAL = 6
+    BUSY = 7
+    STORAGE = 8
     INTERRUPTED = 130
 
 
@@ -20,9 +22,6 @@ class YtAgentError(Exception):
     """Base application error."""
 
     exit_code = ExitCode.EXTERNAL
-
-
-YoutubeCliError = YtAgentError
 
 
 class DependencyError(YtAgentError):
@@ -57,3 +56,9 @@ class ExternalCommandError(YtAgentError):
     def __init__(self, message: str, *, stderr: str | None = None) -> None:
         super().__init__(message)
         self.stderr = stderr
+
+
+class StateLockError(YtAgentError):
+    """Raised when another yt-agent mutation is already running."""
+
+    exit_code = ExitCode.BUSY
