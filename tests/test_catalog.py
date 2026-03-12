@@ -475,11 +475,53 @@ def test_search_clips_filters_by_language(tmp_path: Path) -> None:
     assert len(hits) == 0
 
 
-def test_search_clips_escapes_language_wildcards(tmp_path: Path) -> None:
-    store = _indexed_store(tmp_path)
-    # "%" should not match all languages
-    hits = store.search_clips("welcome", source="transcript", language="%")
-    assert len(hits) == 0
+def test_search_clips_supports_documented_language_wildcards(tmp_path: Path) -> None:
+    store = CatalogStore(tmp_path / "catalog.sqlite")
+    store.initialize()
+    store.upsert_video(
+        VideoUpsert(
+            video_id="abc123def45",
+            title="Demo Video",
+            channel="Alpha",
+            upload_date="2026-03-07",
+            duration_seconds=120,
+            extractor_key="youtube",
+            webpage_url="https://www.youtube.com/watch?v=abc123def45",
+            requested_input=None,
+            source_query=None,
+            output_path=tmp_path / "demo.mp4",
+            info_json_path=None,
+            downloaded_at=None,
+            indexed_at=datetime.now(UTC).isoformat(),
+        )
+    )
+    store.replace_transcripts(
+        "abc123def45",
+        [
+            (
+                SubtitleTrack(
+                    lang="en-US",
+                    source="manual",
+                    is_auto=False,
+                    format="vtt",
+                    file_path=tmp_path / "demo.en-US.vtt",
+                ),
+                [
+                    TranscriptSegment(
+                        segment_index=0,
+                        start_seconds=3.0,
+                        end_seconds=8.0,
+                        text="welcome back to the show",
+                    )
+                ],
+            )
+        ],
+    )
+
+    assert len(store.search_clips("welcome", source="transcript", language="en%")) == 1
+    assert len(store.search_clips("welcome", source="transcript", language="en.*")) == 1
+    assert len(store.search_clips("welcome", source="transcript", language="en*")) == 1
+    assert len(store.search_clips("welcome", source="transcript", language="fr%")) == 0
 
 
 def test_search_videos_filters_by_channel(tmp_path: Path) -> None:

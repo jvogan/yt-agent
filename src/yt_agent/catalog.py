@@ -148,6 +148,17 @@ def _fts_query(query: str) -> str:
     return " ".join(f'"{token}"' for token in tokens) if tokens else ""
 
 
+def _language_match_clause(language: str) -> tuple[str, str]:
+    raw = language.strip()
+    # Support the wildcard styles we document publicly:
+    # - SQL LIKE prefixes such as en%
+    # - glob / regex-ish forms such as en* and en.*
+    pattern = raw.replace(".*", "%").replace("*", "%").replace("?", "_")
+    if "%" in pattern or "_" in pattern:
+        return "LIKE", pattern
+    return "=", raw
+
+
 class VideoDetails(TypedDict):
     video: CatalogVideo
     chapters: list[ChapterEntry]
@@ -699,9 +710,9 @@ class CatalogStore:
                     transcript_sql += " AND v.channel = ?"
                     params.append(channel)
                 if language:
-                    escaped_lang = language.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-                    transcript_sql += " AND st.lang LIKE ? ESCAPE '\\'"
-                    params.append(escaped_lang)
+                    operator, pattern = _language_match_clause(language)
+                    transcript_sql += f" AND st.lang {operator} ?"
+                    params.append(pattern)
                 transcript_sql += " ORDER BY score, t.start_seconds LIMIT ?"
                 params.append(limit)
                 for row in conn.execute(transcript_sql, params):
