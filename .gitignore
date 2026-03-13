@@ -21,3 +21,4 @@ cookies*.txt
 *.sqlite3
 *.db
 *.jsonl
+.claude/

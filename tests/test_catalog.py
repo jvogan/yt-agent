@@ -1,8 +1,20 @@
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from yt_agent.catalog import CatalogStore, VideoUpsert, _fts_query
 from yt_agent.models import ChapterEntry, SubtitleTrack, TranscriptSegment
+
+
+ADVERSARIAL_LONG_TOKEN = "x" * 1001
+ADVERSARIAL_CJK = "\u4e16\u754c"
+ADVERSARIAL_EMOJI = "\U0001F600"
+ADVERSARIAL_RTL = "\u05e9\u05dc\u05d5\u05dd"
+ADVERSARIAL_COMBINING = "Cafe\u0301"
+ADVERSARIAL_VIDEO_ID = "adv123fts45"
+FALLBACK_VIDEO_ID = "plain123456"
 
 
 def test_catalog_indexes_and_queries_video(tmp_path: Path) -> None:
@@ -453,6 +465,114 @@ def _indexed_store(tmp_path: Path) -> CatalogStore:
     return store
 
 
+def _adversarial_store(tmp_path: Path) -> CatalogStore:
+    store = CatalogStore(tmp_path / "catalog.sqlite")
+    store.initialize()
+    indexed_at = datetime.now(UTC).isoformat()
+    title = " | ".join(
+        [
+            '"hello" OR "world"',
+            "col:umn",
+            "NOT something",
+            "NEAR(a b)",
+            "a AND b",
+            "a OR b",
+            "a NOT b",
+            ADVERSARIAL_LONG_TOKEN,
+            ADVERSARIAL_CJK,
+            ADVERSARIAL_EMOJI,
+            ADVERSARIAL_RTL,
+            ADVERSARIAL_COMBINING,
+            "O'Reilly",
+            r"back\\slash",
+            "semi;colon",
+            '"*"',
+            "prefix*",
+        ]
+    )
+    fts_text = " ".join(
+        [
+            "hello world OR",
+            "column",
+            "NOT something",
+            "NEARa b",
+            "a AND b",
+            "a OR b",
+            "a NOT b",
+            ADVERSARIAL_LONG_TOKEN,
+            ADVERSARIAL_CJK,
+            ADVERSARIAL_RTL,
+            "Cafe",
+            "OReilly",
+            "backslash",
+            "semicolon",
+            "nulbyte",
+            "prefix",
+        ]
+    )
+    store.upsert_video(
+        VideoUpsert(
+            video_id=ADVERSARIAL_VIDEO_ID,
+            title=title,
+            channel="Alpha",
+            upload_date="2026-03-07",
+            duration_seconds=120,
+            extractor_key="youtube",
+            webpage_url=f"https://www.youtube.com/watch?v={ADVERSARIAL_VIDEO_ID}",
+            requested_input=None,
+            source_query=None,
+            output_path=None,
+            info_json_path=None,
+            downloaded_at=None,
+            indexed_at=indexed_at,
+        )
+    )
+    store.upsert_video(
+        VideoUpsert(
+            video_id=FALLBACK_VIDEO_ID,
+            title="Plain fallback video",
+            channel="Beta",
+            upload_date="2026-03-06",
+            duration_seconds=90,
+            extractor_key="youtube",
+            webpage_url=f"https://www.youtube.com/watch?v={FALLBACK_VIDEO_ID}",
+            requested_input=None,
+            source_query=None,
+            output_path=None,
+            info_json_path=None,
+            downloaded_at=None,
+            indexed_at=indexed_at,
+        )
+    )
+    store.replace_chapters(
+        ADVERSARIAL_VIDEO_ID,
+        [ChapterEntry(position=0, title=fts_text, start_seconds=0.0, end_seconds=10.0)],
+    )
+    store.replace_transcripts(
+        ADVERSARIAL_VIDEO_ID,
+        [
+            (
+                SubtitleTrack(
+                    lang="en",
+                    source="manual",
+                    is_auto=False,
+                    format="vtt",
+                    file_path=tmp_path / "adversarial.en.vtt",
+                ),
+                [
+                    TranscriptSegment(
+                        segment_index=0,
+                        start_seconds=0.0,
+                        end_seconds=2.0,
+                        text=fts_text,
+                    )
+                ],
+            )
+        ],
+    )
+    return store
+
+
 def test_search_clips_returns_empty_on_stripped_query(tmp_path: Path) -> None:
     store = _indexed_store(tmp_path)
     assert store.search_clips("***") == []
@@ -572,3 +692,94 @@ def test_fts_query_quotes_valid_tokens() -> None:
 def test_fts_query_strips_punctuation_before_quoting_tokens() -> None:
     assert _fts_query('hello, "world"!') == '"hello" "world"'
     assert _fts_query("chapter-title / demo") == '"chapter-title" "demo"'
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ('"hello" OR "world"', '"hello" "OR" "world"'),
+        ("col:umn", '"column"'),
+        ("NOT something", '"NOT" "something"'),
+        ("NEAR(a b)", '"NEARa" "b"'),
+        ("a AND b", '"a" "AND" "b"'),
+        ("a OR b", '"a" "OR" "b"'),
+        ("a NOT b", '"a" "NOT" "b"'),
+        (ADVERSARIAL_CJK, f'"{ADVERSARIAL_CJK}"'),
+        (ADVERSARIAL_EMOJI, ""),
+        (ADVERSARIAL_RTL, f'"{ADVERSARIAL_RTL}"'),
+        (ADVERSARIAL_COMBINING, '"Cafe"'),
+        ("O'Reilly", '"OReilly"'),
+        (r"back\\slash", '"backslash"'),
+        ("semi;colon", '"semicolon"'),
+        ("nul\x00byte", '"nulbyte"'),
+        ("*", ""),
+        ('"*"', ""),
+        ("prefix*", '"prefix"'),
+    ],
+)
+def test_fts_query_sanitizes_adversarial_input(query: str, expected: str) -> None:
+    assert _fts_query(query) == expected
+
+
+def test_fts_query_preserves_very_long_tokens() -> None:
+    assert _fts_query(ADVERSARIAL_LONG_TOKEN) == f'"{ADVERSARIAL_LONG_TOKEN}"'
+
+
+def _assert_search_paths_handle_query(
+    store: CatalogStore,
+    query: str,
+    *,
+    expected_clip_count: int,
+    expected_video_ids: tuple[str, ...],
+) -> None:
+    try:
+        clip_hits = store.search_clips(query, limit=10)
+        video_hits = store.search_videos(query, limit=10)
+    except sqlite3.OperationalError as exc:
+        pytest.fail(f"unexpected sqlite3.OperationalError for query {query!r}: {exc}")
+
+    assert len(clip_hits) == expected_clip_count
+    assert [video.video_id for video in video_hits] == list(expected_video_ids)
+    if clip_hits:
+        assert all(hit.video_id == ADVERSARIAL_VIDEO_ID for hit in clip_hits)
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_clip_count", "expected_video_ids"),
+    [
+        ('"hello" OR "world"', 2, (ADVERSARIAL_VIDEO_ID,)),
+        ("col:umn", 2, (ADVERSARIAL_VIDEO_ID,)),
+        ("NOT something", 2, (ADVERSARIAL_VIDEO_ID,)),
+        ("NEAR(a b)", 2, (ADVERSARIAL_VIDEO_ID,)),
+        ("a AND b", 2, (ADVERSARIAL_VIDEO_ID,)),
+        ("a OR b", 2, (ADVERSARIAL_VIDEO_ID,)),
+        ("a NOT b", 2, (ADVERSARIAL_VIDEO_ID,)),
+        ("", 0, (ADVERSARIAL_VIDEO_ID, FALLBACK_VIDEO_ID)),
+        ("   ", 0, (ADVERSARIAL_VIDEO_ID, FALLBACK_VIDEO_ID)),
+        (ADVERSARIAL_LONG_TOKEN, 2, (ADVERSARIAL_VIDEO_ID,)),
+        (ADVERSARIAL_CJK, 2, (ADVERSARIAL_VIDEO_ID,)),
+        (ADVERSARIAL_EMOJI, 0, (ADVERSARIAL_VIDEO_ID,)),
+        (ADVERSARIAL_RTL, 2, (ADVERSARIAL_VIDEO_ID,)),
+        (ADVERSARIAL_COMBINING, 2, (ADVERSARIAL_VIDEO_ID,)),
+        ("O'Reilly", 2, (ADVERSARIAL_VIDEO_ID,)),
+        (r"back\\slash", 2, (ADVERSARIAL_VIDEO_ID,)),
+        ("semi;colon", 2, (ADVERSARIAL_VIDEO_ID,)),
+        ("nul\x00byte", 2, ()),
+        ("*", 0, (ADVERSARIAL_VIDEO_ID,)),
+        ('"*"', 0, (ADVERSARIAL_VIDEO_ID,)),
+        ("prefix*", 2, (ADVERSARIAL_VIDEO_ID,)),
+    ],
+)
+def test_search_paths_handle_adversarial_queries(
+    tmp_path: Path,
+    query: str,
+    expected_clip_count: int,
+    expected_video_ids: tuple[str, ...],
+) -> None:
+    store = _adversarial_store(tmp_path)
+    _assert_search_paths_handle_query(
+        store,
+        query,
+        expected_clip_count=expected_clip_count,
+        expected_video_ids=expected_video_ids,
+    )
