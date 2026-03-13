@@ -3,9 +3,17 @@ import subprocess
 
 import pytest
 
-from yt_agent.errors import ExternalCommandError, InvalidInputError
+from yt_agent.errors import DependencyError, ExternalCommandError, InvalidInputError
 from yt_agent.models import DownloadTarget, VideoInfo
-from yt_agent.yt_dlp import ResolutionResult, download_target, normalize_target, resolve_payload, resolve_targets, search
+from yt_agent.yt_dlp import (
+    ResolutionResult,
+    command_path,
+    download_target,
+    normalize_target,
+    resolve_payload,
+    resolve_targets,
+    search,
+)
 
 
 def test_normalize_target_wraps_bare_youtube_id() -> None:
@@ -37,9 +45,26 @@ def test_normalize_target_rejects_non_youtube_hosts() -> None:
         normalize_target("http://127.0.0.1:8080/admin")
 
 
+def test_normalize_target_rejects_scheme_only_input() -> None:
+    with pytest.raises(InvalidInputError, match="Only YouTube URLs are supported"):
+        normalize_target("https://")
+
+
+def test_normalize_target_rejects_non_youtube_https_host() -> None:
+    with pytest.raises(InvalidInputError, match="Only YouTube URLs are supported"):
+        normalize_target("https://example.com/watch?v=abc123def45")
+
+
 def test_normalize_target_rejects_lookalike_suffix_hosts() -> None:
     with pytest.raises(InvalidInputError, match="Only YouTube URLs are supported"):
         normalize_target("https://youtube.com.evil.com/watch?v=abc123def45")
+
+
+def test_command_path_raises_when_yt_dlp_is_missing(monkeypatch) -> None:
+    monkeypatch.setattr("yt_agent.yt_dlp.shutil.which", lambda _: None)
+
+    with pytest.raises(DependencyError, match="Required tool 'yt-dlp' is not installed or not on PATH."):
+        command_path()
 
 
 def test_search_parses_dump_single_json(monkeypatch) -> None:
