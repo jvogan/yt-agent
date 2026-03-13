@@ -274,45 +274,21 @@ def test_extract_resolved_clip_prefers_remote_when_requested(settings, monkeypat
     ]
 
 
-def test_extract_resolved_clip_falls_back_to_default_output_when_remote_glob_misses(
-    settings, monkeypatch
-) -> None:
-    recorded: list[list[str]] = []
-
-    def fake_run(args: list[str], message: str) -> None:
-        recorded.append(args)
-
+def test_extract_resolved_clip_requires_opt_in_for_remote_fallback(settings, monkeypatch) -> None:
     monkeypatch.setattr("yt_agent.clips.command_path", lambda: "/usr/local/bin/yt-dlp")
-    monkeypatch.setattr("yt_agent.clips._run", fake_run)
+    monkeypatch.setattr("yt_agent.clips._run", lambda args, message: None)
 
-    extraction = _extract_resolved_clip(
-        settings,
-        _video_info(),
-        media_path=None,
-        label="segment",
-        start_seconds=1.0,
-        end_seconds=2.0,
-        mode="fast",
-        prefer_remote=False,
-    )
-
-    assert extraction.source == "remote"
-    assert extraction.used_remote_fallback is True
-    assert extraction.output_path.suffix == ".mp4"
-    assert not extraction.output_path.exists()
-    assert recorded == [
-        [
-            "/usr/local/bin/yt-dlp",
-            "--quiet",
-            "--no-warnings",
-            "--force-overwrites",
-            "--download-sections",
-            "*1.000-2.000",
-            "--output",
-            str(extraction.output_path.with_suffix(".%(ext)s")),
-            "https://www.youtube.com/watch?v=abc123def45",
-        ]
-    ]
+    with pytest.raises(InvalidInputError, match="Re-run with --remote-fallback"):
+        _extract_resolved_clip(
+            settings,
+            _video_info(),
+            media_path=None,
+            label="segment",
+            start_seconds=1.0,
+            end_seconds=2.0,
+            mode="fast",
+            prefer_remote=False,
+        )
 
 
 def test_extract_clip_uses_remote_fallback(settings, monkeypatch) -> None:
@@ -354,6 +330,36 @@ def test_extract_clip_uses_remote_fallback(settings, monkeypatch) -> None:
 
     assert extraction.source == "remote"
     assert extraction.output_path.exists()
+
+
+def test_extract_clip_requires_remote_fallback_when_local_media_is_missing(settings) -> None:
+    _seed_video(settings, None)
+    store = CatalogStore(settings.catalog_file)
+    store.replace_transcripts(
+        "abc123def45",
+        [
+            (
+                SubtitleTrack(
+                    lang="en",
+                    source="manual",
+                    is_auto=False,
+                    format="vtt",
+                    file_path=settings.catalog_file.parent / "demo.en.vtt",
+                ),
+                [
+                    TranscriptSegment(
+                        segment_index=0,
+                        start_seconds=5.0,
+                        end_seconds=10.0,
+                        text="clip me",
+                    )
+                ],
+            )
+        ],
+    )
+
+    with pytest.raises(InvalidInputError, match="Re-run with --remote-fallback"):
+        extract_clip(settings, "transcript:1", padding_before=1, padding_after=1, mode="fast")
 
 
 def test_extract_clip_for_range_raises_when_end_is_not_after_start(settings) -> None:

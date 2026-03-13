@@ -17,14 +17,13 @@ from rich.table import Table
 from yt_agent import __version__, yt_dlp
 from yt_agent.archive import ensure_archive_file, is_archived, load_archive_entries
 from yt_agent.catalog import CatalogStore
-from yt_agent.clips import extract_clip, extract_clip_for_range
+from yt_agent.clips import extract_clip, extract_clip_for_range, plan_clip, plan_clip_for_range
 from yt_agent.config import Settings, load_settings, render_default_config
 from yt_agent.errors import DependencyError, ExitCode, ExternalCommandError, InvalidInputError, YtAgentError
 from yt_agent.indexer import IndexSummary, index_manifest_record, index_refresh, index_target
-from yt_agent.library import build_clip_output_path
 from yt_agent.manifest import append_manifest_record, ensure_manifest_file, iter_manifest_records
 from yt_agent.models import CatalogVideo, ClipSearchHit, DownloadTarget, ManifestRecord, VideoInfo
-from yt_agent.security import ensure_private_file, operation_lock, sanitize_json_payload, sanitize_terminal_text
+from yt_agent.security import ensure_private_file, operation_lock, sanitize_terminal_text
 from yt_agent.selector import parse_selection, select_results
 from yt_agent.tui import launch_tui
 
@@ -80,10 +79,10 @@ def _json_error_payload(
         "status": "error",
         "exit_code": exit_code,
         "error_type": error_type,
-        "message": sanitize_terminal_text(message),
+        "message": message,
     }
     if stderr:
-        payload["stderr"] = sanitize_terminal_text(stderr)
+        payload["stderr"] = stderr
     return payload
 
 
@@ -140,7 +139,7 @@ def _download_operation_item_payload(item: DownloadOperationItem) -> dict[str, A
         **_video_info_payload(item.info),
     }
     if item.reason:
-        payload["reason"] = sanitize_terminal_text(item.reason)
+        payload["reason"] = item.reason
     if item.output_path is not None:
         payload["output_path"] = str(item.output_path)
     if item.info_json_path is not None:
@@ -149,11 +148,11 @@ def _download_operation_item_payload(item: DownloadOperationItem) -> dict[str, A
     if item.index_summary is not None:
         payload["index_summary"] = _index_summary_payload(item.index_summary)
     if item.index_warning:
-        payload["index_warning"] = sanitize_terminal_text(item.index_warning)
+        payload["index_warning"] = item.index_warning
     if item.error_message:
-        payload["error_message"] = sanitize_terminal_text(item.error_message)
+        payload["error_message"] = item.error_message
     if item.stderr:
-        payload["stderr"] = sanitize_terminal_text(item.stderr)
+        payload["stderr"] = item.stderr
     return payload
 
 
@@ -185,14 +184,13 @@ def _normalize_output_mode(value: str) -> str:
 
 
 def _print_json(payload: object) -> None:
-    # JSON mode still lands in a terminal, so sanitize nested strings before emission.
-    console.file.write(json.dumps(sanitize_json_payload(payload), indent=2))
+    console.file.write(json.dumps(payload, indent=2))
     console.file.write("\n")
     console.file.flush()
 
 
 def _print_json_error(payload: object) -> None:
-    error_console.file.write(json.dumps(sanitize_json_payload(payload), indent=2))
+    error_console.file.write(json.dumps(payload, indent=2))
     error_console.file.write("\n")
     error_console.file.flush()
 
@@ -224,9 +222,10 @@ def _prepare_storage(settings: Settings) -> None:
     ensure_manifest_file(settings.manifest_file)
 
 
-def _catalog(settings: Settings) -> CatalogStore:
-    store = CatalogStore(settings.catalog_file)
-    store.ensure_schema()
+def _catalog(settings: Settings, *, readonly: bool = False) -> CatalogStore:
+    store = CatalogStore(settings.catalog_file, readonly=readonly)
+    if not readonly:
+        store.ensure_schema()
     return store
 
 
@@ -781,18 +780,18 @@ def _download_operation_payload(
     downloaded = [_download_operation_item_payload(item) for item in items if item.status == "downloaded"]
     skipped = [_download_operation_item_payload(item) for item in items if item.status == "skipped"]
     failed = [_download_operation_item_payload(item) for item in items if item.status == "failed"]
-    warnings: list[Any] = [sanitize_terminal_text(message) for message in (skipped_messages or [])]
+    warnings: list[Any] = list(skipped_messages or [])
     warnings.extend(
-        {"video_id": item.info.video_id, "warning": sanitize_terminal_text(item.index_warning)}
+        {"video_id": item.info.video_id, "warning": item.index_warning}
         for item in items
         if item.index_warning
     )
     errors = [
         {
             "video_id": item.info.video_id,
-            "title": sanitize_terminal_text(item.info.title),
-            "message": sanitize_terminal_text(item.error_message or "download failed"),
-            "stderr": sanitize_terminal_text(item.stderr) if item.stderr else "",
+            "title": item.info.title,
+            "message": item.error_message or "download failed",
+            "stderr": item.stderr or "",
         }
         for item in items
         if item.status == "failed"
@@ -1334,6 +1333,7 @@ def _clip_grab_payload(
         padding_after=padding_after,
         mode=mode,
         output_path=extraction_payload.get("output_path"),
+        output_path_is_template=bool(extraction_payload.get("output_path_is_template")),
         source=extraction_payload.get("source"),
         used_remote_fallback=extraction_payload.get("used_remote_fallback"),
         dry_run=dry_run,
@@ -1922,7 +1922,7 @@ def clips_search_command(
 
     def _command() -> None:
         settings = _load_settings(config)
-        store = _catalog(settings)
+        store = _catalog(settings, readonly=True)
         hits = store.search_clips(query, source=source, channel=channel, language=lang, limit=limit)
         if not hits:
             if _normalize_output_mode(output) == "json":
@@ -1945,7 +1945,7 @@ def clips_show_command(
 
     def _command() -> None:
         settings = _load_settings(config)
-        store = _catalog(settings)
+        store = _catalog(settings, readonly=True)
         hit = store.get_clip_hit(result_id)
         if hit is None:
             raise InvalidInputError(f"Unknown clip result '{result_id}'.")
@@ -2024,67 +2024,35 @@ def clips_grab_command(
             raise InvalidInputError("Pass a RESULT_ID or --video-id/--start-seconds/--end-seconds.")
 
         if dry_run:
-            store = CatalogStore(settings.catalog_file)
             if using_explicit_range:
-                assert video_id is not None
-                assert start_seconds is not None
-                assert end_seconds is not None
-                video = store.get_video(video_id, readonly=True)
-                if video is None:
-                    raise InvalidInputError(f"Video id '{video_id}' is not in the catalog.")
-                info = VideoInfo(
-                    video_id=video.video_id,
-                    title=video.title,
-                    channel=video.channel,
-                    upload_date=video.upload_date,
-                    duration_seconds=video.duration_seconds,
-                    extractor_key=video.extractor_key,
-                    webpage_url=video.webpage_url,
-                    original_url=video.requested_input,
-                )
-                preview_start = max(0.0, start_seconds)
-                preview_end = end_seconds
-                preview_output = build_clip_output_path(
-                    settings.clips_root,
-                    info,
-                    label="range",
-                    start_seconds=preview_start,
-                    end_seconds=preview_end,
-                    extension="mp4",
+                assert video_id is not None and start_seconds is not None and end_seconds is not None
+                preview = plan_clip_for_range(
+                    settings,
+                    video_id=video_id,
+                    start_seconds=start_seconds,
+                    end_seconds=end_seconds,
+                    mode=normalized_mode,
+                    prefer_remote=remote_fallback,
                 )
             else:
                 assert result_id is not None
-                hit = store.get_clip_hit(result_id, readonly=True)
-                if hit is None:
-                    raise InvalidInputError(f"Unknown clip result '{result_id}'.")
-                info = VideoInfo(
-                    video_id=hit.video_id,
-                    title=hit.title,
-                    channel=hit.channel,
-                    upload_date=None,
-                    duration_seconds=None,
-                    extractor_key="youtube",
-                    webpage_url=hit.webpage_url,
-                    original_url=hit.webpage_url,
-                )
-                preview_start = max(0.0, hit.start_seconds - padding_before)
-                preview_end = max(preview_start + 0.1, hit.end_seconds + padding_after)
-                preview_output = build_clip_output_path(
-                    settings.clips_root,
-                    info,
-                    label=hit.source,
-                    start_seconds=preview_start,
-                    end_seconds=preview_end,
-                    extension="mp4",
+                preview = plan_clip(
+                    settings,
+                    result_id,
+                    padding_before=padding_before,
+                    padding_after=padding_after,
+                    mode=normalized_mode,
+                    prefer_remote=remote_fallback,
                 )
             payload = _clip_grab_payload(
                 locator=locator,
                 extraction={
-                    "output_path": str(preview_output),
-                    "source": "remote" if remote_fallback else "local",
-                    "start_seconds": preview_start,
-                    "end_seconds": preview_end,
-                    "used_remote_fallback": remote_fallback,
+                    "output_path": str(preview.output_template or preview.output_path),
+                    "output_path_is_template": preview.output_template is not None,
+                    "source": preview.source,
+                    "start_seconds": preview.start_seconds,
+                    "end_seconds": preview.end_seconds,
+                    "used_remote_fallback": preview.used_remote_fallback,
                 },
                 mode=normalized_mode,
                 padding_before=padding_before,
@@ -2151,7 +2119,7 @@ def library_list_command(
 
     def _command() -> None:
         settings = _load_settings(config)
-        store = _catalog(settings)
+        store = _catalog(settings, readonly=True)
         videos = store.list_videos(
             channel=channel,
             playlist_id=playlist,
@@ -2187,7 +2155,7 @@ def library_search_command(
 
     def _command() -> None:
         settings = _load_settings(config)
-        store = _catalog(settings)
+        store = _catalog(settings, readonly=True)
         videos = store.search_videos(
             query,
             channel=channel,
@@ -2217,7 +2185,7 @@ def library_show_command(
 
     def _command() -> None:
         settings = _load_settings(config)
-        store = _catalog(settings)
+        store = _catalog(settings, readonly=True)
         _render_library_detail(store, video_id, output_mode=output)
 
     _run_guarded(_command, output_mode=output)
@@ -2232,7 +2200,7 @@ def library_stats_command(
 
     def _command() -> None:
         settings = _load_settings(config)
-        store = _catalog(settings)
+        store = _catalog(settings, readonly=True)
         payload = store.library_stats()
         mode = _normalize_output_mode(output)
         if mode == "json":
@@ -2260,7 +2228,7 @@ def library_channels_command(
 
     def _command() -> None:
         settings = _load_settings(config)
-        store = _catalog(settings)
+        store = _catalog(settings, readonly=True)
         channels = store.list_channels()
         mode = _normalize_output_mode(output)
         if not channels:
@@ -2294,7 +2262,7 @@ def library_playlists_command(
 
     def _command() -> None:
         settings = _load_settings(config)
-        store = _catalog(settings)
+        store = _catalog(settings, readonly=True)
         playlists = store.list_playlists()
         mode = _normalize_output_mode(output)
         if not playlists:

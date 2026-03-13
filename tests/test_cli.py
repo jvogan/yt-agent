@@ -138,7 +138,7 @@ def test_cli_exit_code_matrix(settings, monkeypatch, scenario, argv, expected_ex
     elif scenario == "storage":
         monkeypatch.setattr(
             "yt_agent.cli._catalog",
-            lambda current_settings: (_ for _ in ()).throw(sqlite3.OperationalError("database is locked")),
+            lambda current_settings, readonly=False: (_ for _ in ()).throw(sqlite3.OperationalError("database is locked")),
         )
     elif scenario == "interrupted":
         monkeypatch.setattr(
@@ -356,7 +356,7 @@ def test_download_continues_after_single_failure(settings, monkeypatch) -> None:
                 "exit_code": 6,
                 "error_type": "ExternalCommandError",
                 "message": "boom",
-                "stderr": "bad next",
+                "stderr": "bad\x1b[31m\nnext",
             },
         ),
         (
@@ -485,7 +485,7 @@ def test_clips_search_renders_result_ids(settings, monkeypatch) -> None:
             ]
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda settings, readonly=False: FakeStore())
     result = runner.invoke(app, ["clips", "search", "Intro"])
     assert result.exit_code == 0
     assert "chapter:1" in result.stdout
@@ -505,7 +505,7 @@ def test_library_stats_json_output(settings, monkeypatch) -> None:
             }
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda settings, readonly=False: FakeStore())
     result = runner.invoke(app, ["library", "stats", "--output", "json"])
     assert result.exit_code == 0
     assert '"videos": 3' in result.stdout
@@ -553,7 +553,7 @@ def test_run_guarded_catches_sqlite_error(settings, monkeypatch) -> None:
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
     monkeypatch.setattr(
         "yt_agent.cli._catalog",
-        lambda s: (_ for _ in ()).throw(sqlite3.DatabaseError("database disk image is malformed")),
+        lambda s, readonly=False: (_ for _ in ()).throw(sqlite3.DatabaseError("database disk image is malformed")),
     )
     result = runner.invoke(app, ["library", "stats"])
     assert result.exit_code == 8
@@ -590,7 +590,7 @@ def test_library_channels_table_output(settings, monkeypatch) -> None:
             return ["Alpha", "Zeta"]
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda s: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda s, readonly=False: FakeStore())
     result = runner.invoke(app, ["library", "channels"])
     assert result.exit_code == 0
     assert "Alpha" in result.stdout
@@ -603,7 +603,7 @@ def test_library_channels_json_output(settings, monkeypatch) -> None:
             return ["Alpha", "Zeta"]
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda s: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda s, readonly=False: FakeStore())
     result = runner.invoke(app, ["library", "channels", "--output", "json"])
     assert result.exit_code == 0
     data = json.loads(result.stdout)
@@ -616,7 +616,7 @@ def test_library_channels_empty_exits_zero(settings, monkeypatch) -> None:
             return []
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda s: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda s, readonly=False: FakeStore())
     result = runner.invoke(app, ["library", "channels"])
     assert result.exit_code == 0
     assert "No channels found." in result.stdout
@@ -631,7 +631,7 @@ def test_library_playlists_table_output(settings, monkeypatch) -> None:
             return [{"playlist_id": "PL123", "title": "My Playlist", "channel": "Channel", "entry_count": "3"}]
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda s: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda s, readonly=False: FakeStore())
     result = runner.invoke(app, ["library", "playlists"])
     assert result.exit_code == 0
     assert "My Playlist" in result.stdout
@@ -643,14 +643,14 @@ def test_library_playlists_json_output(settings, monkeypatch) -> None:
             return [{"playlist_id": "PL123", "title": "My Playlist", "channel": "Channel", "entry_count": "3"}]
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda s: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda s, readonly=False: FakeStore())
     result = runner.invoke(app, ["library", "playlists", "--output", "json"])
     assert result.exit_code == 0
     data = json.loads(result.stdout)
     assert data[0]["playlist_id"] == "PL123"
 
 
-def test_library_playlists_json_output_recursively_sanitizes_nested_strings(settings, monkeypatch) -> None:
+def test_library_playlists_json_output_preserves_machine_readable_strings(settings, monkeypatch) -> None:
     class FakeStore:
         def list_playlists(self):
             return [
@@ -663,17 +663,17 @@ def test_library_playlists_json_output_recursively_sanitizes_nested_strings(sett
             ]
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda s: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda s, readonly=False: FakeStore())
     result = runner.invoke(app, ["library", "playlists", "--output", "json"])
 
     assert result.exit_code == 0
-    assert "\x1b" not in result.stdout
+    assert "\\u001b" in result.stdout
     data = json.loads(result.stdout)
     assert data == [
         {
             "playlist_id": "PL123",
-            "title": "Bad Title",
-            "channel": "Chan Name",
+            "title": "Bad\nTitle\x1b[31m",
+            "channel": "Chan\tName",
             "entry_count": "3",
         }
     ]
@@ -685,7 +685,7 @@ def test_library_playlists_empty_exits_zero(settings, monkeypatch) -> None:
             return []
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda s: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda s, readonly=False: FakeStore())
     result = runner.invoke(app, ["library", "playlists"])
     assert result.exit_code == 0
     assert "No playlists found." in result.stdout
@@ -700,7 +700,7 @@ def test_library_remove_prints_removed_and_not_found(settings, monkeypatch) -> N
             return video_id == "abc123def45"
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda s: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda s, readonly=False: FakeStore())
     result = runner.invoke(app, ["library", "remove", "abc123def45", "unknownvid00"])
     assert result.exit_code == 0
     assert "Removed" in result.stdout
@@ -715,7 +715,7 @@ def test_library_remove_json_output(settings, monkeypatch) -> None:
             return True
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda s: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda s, readonly=False: FakeStore())
     result = runner.invoke(app, ["library", "remove", "abc123def45", "--output", "json"])
     assert result.exit_code == 0
     data = json.loads(result.stdout)
@@ -922,7 +922,7 @@ def test_index_refresh_dry_run_json_envelope_does_not_write(settings, monkeypatc
 
 def test_library_remove_dry_run_json_envelope_does_not_write(settings, monkeypatch) -> None:
     class FakeStore:
-        def __init__(self, path):
+        def __init__(self, path, *, readonly=False):
             self.path = path
 
         def get_video(self, video_id, readonly=False):
@@ -963,8 +963,12 @@ def test_library_remove_dry_run_json_envelope_does_not_write(settings, monkeypat
 
 
 def test_clips_grab_dry_run_json_uses_result_locator(settings, monkeypatch) -> None:
+    media_path = settings.download_root / "Channel" / "demo.mp4"
+    media_path.parent.mkdir(parents=True, exist_ok=True)
+    media_path.write_bytes(b"video")
+
     class FakeStore:
-        def __init__(self, path):
+        def __init__(self, path, *, readonly=False):
             self.path = path
 
         def get_clip_hit(self, result_id, readonly=False):
@@ -980,11 +984,12 @@ def test_clips_grab_dry_run_json_uses_result_locator(settings, monkeypatch) -> N
                     "start_seconds": 10.0,
                     "end_seconds": 14.0,
                     "source": "transcript",
+                    "output_path": media_path,
                 },
             )()
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli.CatalogStore", FakeStore)
+    monkeypatch.setattr("yt_agent.clips.CatalogStore", FakeStore)
 
     result = runner.invoke(app, ["clips", "grab", "transcript:12", "--dry-run", "--output", "json"])
 
@@ -1010,8 +1015,12 @@ def test_clips_grab_dry_run_json_uses_result_locator(settings, monkeypatch) -> N
 
 
 def test_clips_grab_dry_run_json_uses_explicit_range_locator(settings, monkeypatch) -> None:
+    media_path = settings.download_root / "Channel" / "demo.mkv"
+    media_path.parent.mkdir(parents=True, exist_ok=True)
+    media_path.write_bytes(b"video")
+
     class FakeStore:
-        def __init__(self, path):
+        def __init__(self, path, *, readonly=False):
             self.path = path
 
         def get_video(self, video_id, readonly=False):
@@ -1028,11 +1037,12 @@ def test_clips_grab_dry_run_json_uses_explicit_range_locator(settings, monkeypat
                     "extractor_key": "youtube",
                     "webpage_url": "https://www.youtube.com/watch?v=abc123def45",
                     "requested_input": "https://www.youtube.com/watch?v=abc123def45",
+                    "output_path": media_path,
                 },
             )()
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli.CatalogStore", FakeStore)
+    monkeypatch.setattr("yt_agent.clips.CatalogStore", FakeStore)
 
     result = runner.invoke(
         app,
@@ -1064,10 +1074,108 @@ def test_clips_grab_dry_run_json_uses_explicit_range_locator(settings, monkeypat
     assert payload["source"] == "local"
     assert payload["used_remote_fallback"] is False
     assert payload["dry_run"] is True
-    assert payload["output_path"].endswith("range.mp4")
+    assert payload["output_path"].endswith("range.mkv")
     assert result.stderr == ""
     assert not settings.clips_root.exists()
     assert not (settings.catalog_file.parent / "operation.lock").exists()
+
+
+def test_clips_grab_dry_run_requires_remote_fallback_when_local_media_is_missing(settings, monkeypatch) -> None:
+    class FakeStore:
+        def __init__(self, path, *, readonly=False):
+            self.path = path
+
+        def get_video(self, video_id, readonly=False):
+            return type(
+                "Video",
+                (),
+                {
+                    "video_id": video_id,
+                    "title": "Demo",
+                    "channel": "Channel",
+                    "upload_date": "2026-03-07",
+                    "duration_seconds": 91,
+                    "extractor_key": "youtube",
+                    "webpage_url": "https://www.youtube.com/watch?v=abc123def45",
+                    "requested_input": "https://www.youtube.com/watch?v=abc123def45",
+                    "output_path": settings.download_root / "Channel" / "missing.mp4",
+                },
+            )()
+
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+    monkeypatch.setattr("yt_agent.clips.CatalogStore", FakeStore)
+
+    result = runner.invoke(
+        app,
+        [
+            "clips",
+            "grab",
+            "--video-id",
+            "abc123def45",
+            "--start-seconds",
+            "12.5",
+            "--end-seconds",
+            "18",
+            "--dry-run",
+            "--output",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 4
+    payload = json.loads(result.stderr)
+    assert payload["message"] == "Local media is unavailable for this clip. Re-run with --remote-fallback."
+
+
+def test_clips_grab_dry_run_remote_fallback_uses_template_path(settings, monkeypatch) -> None:
+    class FakeStore:
+        def __init__(self, path, *, readonly=False):
+            self.path = path
+
+        def get_video(self, video_id, readonly=False):
+            return type(
+                "Video",
+                (),
+                {
+                    "video_id": video_id,
+                    "title": "Demo",
+                    "channel": "Channel",
+                    "upload_date": "2026-03-07",
+                    "duration_seconds": 91,
+                    "extractor_key": "youtube",
+                    "webpage_url": "https://www.youtube.com/watch?v=abc123def45",
+                    "requested_input": "https://www.youtube.com/watch?v=abc123def45",
+                    "output_path": None,
+                },
+            )()
+
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+    monkeypatch.setattr("yt_agent.clips.CatalogStore", FakeStore)
+
+    result = runner.invoke(
+        app,
+        [
+            "clips",
+            "grab",
+            "--video-id",
+            "abc123def45",
+            "--start-seconds",
+            "12.5",
+            "--end-seconds",
+            "18",
+            "--remote-fallback",
+            "--dry-run",
+            "--output",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["source"] == "remote"
+    assert payload["used_remote_fallback"] is True
+    assert payload["output_path_is_template"] is True
+    assert payload["output_path"].endswith(".%(ext)s")
 
 
 @pytest.mark.parametrize(
@@ -1269,6 +1377,27 @@ def test_download_quiet_plain_keeps_failure_details_on_stderr(settings, monkeypa
     assert "Failed: Demo [abc123def45] yt-dlp download failed. bad next" in result.stderr.replace("\n", " ")
 
 
+def test_download_json_failure_preserves_raw_stderr(settings, monkeypatch) -> None:
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+    monkeypatch.setattr(
+        "yt_agent.cli._resolve_download_inputs",
+        lambda inputs, current_settings, **kwargs: ([DownloadTarget(original_input="abc123def45", info=_video())], []),
+    )
+    monkeypatch.setattr(
+        "yt_agent.cli.yt_dlp.download_target",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ExternalCommandError("yt-dlp download failed.", stderr="bad\x1b[31m\nnext")
+        ),
+    )
+
+    result = runner.invoke(app, ["download", "abc123def45", "--output", "json"])
+
+    assert result.exit_code == 6
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "error"
+    assert payload["errors"][0]["stderr"] == "bad\x1b[31m\nnext"
+
+
 def test_download_json_requires_select_for_select_playlist(settings, monkeypatch) -> None:
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
 
@@ -1411,7 +1540,7 @@ def test_clips_search_json_empty(settings, monkeypatch) -> None:
             return []
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings, readonly=False: FakeStore())
 
     result = runner.invoke(app, ["clips", "search", "missing", "--output", "json"])
 
@@ -1426,7 +1555,7 @@ def test_clips_show_json_output(settings, monkeypatch) -> None:
             return _clip_hit(result_id)
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings, readonly=False: FakeStore())
 
     result = runner.invoke(app, ["clips", "show", "transcript:12", "--output", "json"])
 
@@ -1473,7 +1602,7 @@ def test_library_list_json_empty(settings, monkeypatch) -> None:
             return []
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings, readonly=False: FakeStore())
 
     result = runner.invoke(app, ["library", "list", "--output", "json"])
 
@@ -1487,7 +1616,7 @@ def test_library_search_json_empty(settings, monkeypatch) -> None:
             return []
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings, readonly=False: FakeStore())
 
     result = runner.invoke(app, ["library", "search", "missing", "--output", "json"])
 
@@ -1526,7 +1655,7 @@ def test_library_show_json_output(settings, monkeypatch) -> None:
             }
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings, readonly=False: FakeStore())
 
     result = runner.invoke(app, ["library", "show", "abc123def45", "--output", "json"])
 
@@ -1544,7 +1673,7 @@ def test_library_list_table_output(settings, monkeypatch) -> None:
             return [_catalog_video()]
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings, readonly=False: FakeStore())
 
     result = runner.invoke(app, ["library", "list"])
 
@@ -1560,7 +1689,7 @@ def test_library_search_plain_output(settings, monkeypatch) -> None:
             return [_catalog_video("def123abc45", title="Second")]
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings, readonly=False: FakeStore())
 
     result = runner.invoke(app, ["library", "search", "demo", "--output", "plain"])
     normalized_output = result.stdout.replace("\n", "")
@@ -1590,7 +1719,7 @@ def test_library_show_plain_output(settings, monkeypatch) -> None:
             }
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings, readonly=False: FakeStore())
 
     result = runner.invoke(app, ["library", "show", "abc123def45", "--output", "plain"])
     normalized_output = result.stdout.replace("\n", "")
@@ -1621,7 +1750,7 @@ def test_library_show_table_output(settings, monkeypatch) -> None:
             }
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings, readonly=False: FakeStore())
 
     result = runner.invoke(app, ["library", "show", "abc123def45"])
 
@@ -1638,7 +1767,7 @@ def test_library_stats_plain_output(settings, monkeypatch) -> None:
             return {"videos": 3, "channels": 1}
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings, readonly=False: FakeStore())
 
     result = runner.invoke(app, ["library", "stats", "--output", "plain"])
     normalized_output = result.stdout.replace("\n", "")
@@ -1655,7 +1784,7 @@ def test_library_stats_table_output(settings, monkeypatch) -> None:
             return {"videos": 3, "channels": 1}
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings, readonly=False: FakeStore())
 
     result = runner.invoke(app, ["library", "stats"])
 
@@ -1671,7 +1800,7 @@ def test_library_channels_plain_output(settings, monkeypatch) -> None:
             return ["Alpha", "Zeta"]
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings, readonly=False: FakeStore())
 
     result = runner.invoke(app, ["library", "channels", "--output", "plain"])
 
@@ -1686,7 +1815,7 @@ def test_library_playlists_plain_output(settings, monkeypatch) -> None:
             return [{"playlist_id": "PL123", "title": "My Playlist", "channel": "Channel", "entry_count": "3"}]
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings, readonly=False: FakeStore())
 
     result = runner.invoke(app, ["library", "playlists", "--output", "plain"])
 
@@ -1701,7 +1830,7 @@ def test_clips_show_plain_output(settings, monkeypatch) -> None:
             return _clip_hit(result_id)
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings, readonly=False: FakeStore())
 
     result = runner.invoke(app, ["clips", "show", "transcript:12", "--output", "plain"])
     normalized_output = result.stdout.replace("\n", "")
@@ -1718,7 +1847,7 @@ def test_clips_show_table_output(settings, monkeypatch) -> None:
             return _clip_hit(result_id)
 
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings: FakeStore())
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda current_settings, readonly=False: FakeStore())
 
     result = runner.invoke(app, ["clips", "show", "transcript:12"])
 

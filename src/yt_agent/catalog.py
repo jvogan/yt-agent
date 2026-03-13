@@ -169,11 +169,13 @@ class VideoDetails(TypedDict):
 class CatalogStore:
     """High-level catalog API used by the CLI, TUI, and indexer."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, readonly: bool = False) -> None:
         self.path = path
+        self.readonly = readonly
 
-    def connect(self, *, readonly: bool = False) -> sqlite3.Connection:
-        if readonly:
+    def connect(self, *, readonly: bool | None = None) -> sqlite3.Connection:
+        effective_readonly = self.readonly if readonly is None else readonly
+        if effective_readonly:
             if not self.path.exists():
                 raise FileNotFoundError(self.path)
             conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
@@ -326,7 +328,7 @@ class CatalogStore:
                 (playlist.playlist_id, video_id, playlist.position),
             )
 
-    def get_video(self, video_id: str, *, readonly: bool = False) -> CatalogVideo | None:
+    def get_video(self, video_id: str, *, readonly: bool | None = None) -> CatalogVideo | None:
         try:
             with self.connect(readonly=readonly) as conn:
                 row = conn.execute(
@@ -386,8 +388,11 @@ class CatalogStore:
             query += " WHERE " + " AND ".join(clauses)
         query += " ORDER BY COALESCE(v.upload_date, '') DESC, COALESCE(v.downloaded_at, '') DESC LIMIT ?"
         params.append(limit)
-        with self.connect() as conn:
-            rows = conn.execute(query, params).fetchall()
+        try:
+            with self.connect() as conn:
+                rows = conn.execute(query, params).fetchall()
+        except FileNotFoundError:
+            return []
         return [_row_to_catalog_video(row) for row in rows]
 
     def search_videos(
@@ -441,28 +446,37 @@ class CatalogStore:
         sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY COALESCE(v.upload_date, '') DESC, COALESCE(v.downloaded_at, '') DESC LIMIT ?"
         params.append(limit)
-        with self.connect() as conn:
-            rows = conn.execute(sql, params).fetchall()
+        try:
+            with self.connect() as conn:
+                rows = conn.execute(sql, params).fetchall()
+        except FileNotFoundError:
+            return []
         return [_row_to_catalog_video(row) for row in rows]
 
     def list_channels(self) -> list[str]:
-        with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT DISTINCT channel FROM videos WHERE channel <> '' ORDER BY channel COLLATE NOCASE"
-            ).fetchall()
+        try:
+            with self.connect() as conn:
+                rows = conn.execute(
+                    "SELECT DISTINCT channel FROM videos WHERE channel <> '' ORDER BY channel COLLATE NOCASE"
+                ).fetchall()
+        except FileNotFoundError:
+            return []
         return [str(row["channel"]) for row in rows]
 
     def list_playlists(self) -> list[dict[str, str]]:
-        with self.connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT pl.playlist_id, pl.title, pl.channel, COUNT(pe.video_id) AS entry_count
-                FROM playlists pl
-                LEFT JOIN playlist_entries pe ON pe.playlist_id = pl.playlist_id
-                GROUP BY pl.playlist_id, pl.title, pl.channel
-                ORDER BY pl.title COLLATE NOCASE
-                """
-            ).fetchall()
+        try:
+            with self.connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT pl.playlist_id, pl.title, pl.channel, COUNT(pe.video_id) AS entry_count
+                    FROM playlists pl
+                    LEFT JOIN playlist_entries pe ON pe.playlist_id = pl.playlist_id
+                    GROUP BY pl.playlist_id, pl.title, pl.channel
+                    ORDER BY pl.title COLLATE NOCASE
+                    """
+                ).fetchall()
+        except FileNotFoundError:
+            return []
         return [
             {
                 "playlist_id": str(row["playlist_id"]),
@@ -474,19 +488,30 @@ class CatalogStore:
         ]
 
     def library_stats(self) -> dict[str, int]:
-        with self.connect() as conn:
-            row = conn.execute(
-                """
-                SELECT
-                    (SELECT COUNT(*) FROM videos) AS videos,
-                    (SELECT COUNT(*) FROM videos WHERE output_path IS NOT NULL) AS local_media,
-                    (SELECT COUNT(*) FROM playlists) AS playlists,
-                    (SELECT COUNT(*) FROM chapters) AS chapters,
-                    (SELECT COUNT(*) FROM subtitle_tracks) AS subtitle_tracks,
-                    (SELECT COUNT(*) FROM transcript_segments) AS transcript_segments,
-                    (SELECT COUNT(DISTINCT channel) FROM videos WHERE channel <> '') AS channels
-                """
-            ).fetchone()
+        try:
+            with self.connect() as conn:
+                row = conn.execute(
+                    """
+                    SELECT
+                        (SELECT COUNT(*) FROM videos) AS videos,
+                        (SELECT COUNT(*) FROM videos WHERE output_path IS NOT NULL) AS local_media,
+                        (SELECT COUNT(*) FROM playlists) AS playlists,
+                        (SELECT COUNT(*) FROM chapters) AS chapters,
+                        (SELECT COUNT(*) FROM subtitle_tracks) AS subtitle_tracks,
+                        (SELECT COUNT(*) FROM transcript_segments) AS transcript_segments,
+                        (SELECT COUNT(DISTINCT channel) FROM videos WHERE channel <> '') AS channels
+                    """
+                ).fetchone()
+        except FileNotFoundError:
+            return {
+                "videos": 0,
+                "local_media": 0,
+                "playlists": 0,
+                "chapters": 0,
+                "subtitle_tracks": 0,
+                "transcript_segments": 0,
+                "channels": 0,
+            }
         return {
             "videos": int(row["videos"] or 0),
             "local_media": int(row["local_media"] or 0),
@@ -498,16 +523,19 @@ class CatalogStore:
         }
 
     def video_chapters(self, video_id: str) -> list[ChapterEntry]:
-        with self.connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT position, title, start_seconds, end_seconds
-                FROM chapters
-                WHERE video_id = ?
-                ORDER BY position
-                """,
-                (video_id,),
-            ).fetchall()
+        try:
+            with self.connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT position, title, start_seconds, end_seconds
+                    FROM chapters
+                    WHERE video_id = ?
+                    ORDER BY position
+                    """,
+                    (video_id,),
+                ).fetchall()
+        except FileNotFoundError:
+            return []
         return [
             ChapterEntry(
                 position=int(row["position"]),
@@ -519,16 +547,19 @@ class CatalogStore:
         ]
 
     def subtitle_tracks(self, video_id: str) -> list[SubtitleTrack]:
-        with self.connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT lang, source, is_auto, format, file_path
-                FROM subtitle_tracks
-                WHERE video_id = ?
-                ORDER BY is_auto, lang
-                """,
-                (video_id,),
-            ).fetchall()
+        try:
+            with self.connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT lang, source, is_auto, format, file_path
+                    FROM subtitle_tracks
+                    WHERE video_id = ?
+                    ORDER BY is_auto, lang
+                    """,
+                    (video_id,),
+                ).fetchall()
+        except FileNotFoundError:
+            return []
         return [
             SubtitleTrack(
                 lang=str(row["lang"]),
@@ -541,17 +572,20 @@ class CatalogStore:
         ]
 
     def transcript_preview(self, video_id: str, *, limit: int = 6) -> list[TranscriptSegment]:
-        with self.connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT segment_index, start_seconds, end_seconds, text
-                FROM transcript_segments
-                WHERE video_id = ?
-                ORDER BY segment_index
-                LIMIT ?
-                """,
-                (video_id, limit),
-            ).fetchall()
+        try:
+            with self.connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT segment_index, start_seconds, end_seconds, text
+                    FROM transcript_segments
+                    WHERE video_id = ?
+                    ORDER BY segment_index
+                    LIMIT ?
+                    """,
+                    (video_id, limit),
+                ).fetchall()
+        except FileNotFoundError:
+            return []
         return [
             TranscriptSegment(
                 segment_index=int(row["segment_index"]),
@@ -563,63 +597,66 @@ class CatalogStore:
         ]
 
     def get_video_details(self, video_id: str) -> VideoDetails | None:
-        with self.connect() as conn:
-            row = conn.execute(
-                """
-                SELECT v.*,
-                    (SELECT COUNT(*) FROM chapters c WHERE c.video_id = v.video_id) AS chapter_count,
-                    (SELECT COUNT(*) FROM transcript_segments t WHERE t.video_id = v.video_id) AS transcript_segment_count,
-                    (SELECT COUNT(*) FROM playlist_entries p WHERE p.video_id = v.video_id) AS playlist_count
-                FROM videos v WHERE v.video_id = ?
-                """,
-                (video_id,),
-            ).fetchone()
-            if row is None:
-                return None
-            video = _row_to_catalog_video(row)
+        try:
+            with self.connect() as conn:
+                row = conn.execute(
+                    """
+                    SELECT v.*,
+                        (SELECT COUNT(*) FROM chapters c WHERE c.video_id = v.video_id) AS chapter_count,
+                        (SELECT COUNT(*) FROM transcript_segments t WHERE t.video_id = v.video_id) AS transcript_segment_count,
+                        (SELECT COUNT(*) FROM playlist_entries p WHERE p.video_id = v.video_id) AS playlist_count
+                    FROM videos v WHERE v.video_id = ?
+                    """,
+                    (video_id,),
+                ).fetchone()
+                if row is None:
+                    return None
+                video = _row_to_catalog_video(row)
 
-            chapter_rows = conn.execute(
-                "SELECT position, title, start_seconds, end_seconds FROM chapters WHERE video_id = ? ORDER BY position",
-                (video_id,),
-            ).fetchall()
-            chapters = [
-                ChapterEntry(
-                    position=int(r["position"]),
-                    title=str(r["title"]),
-                    start_seconds=float(r["start_seconds"]),
-                    end_seconds=float(r["end_seconds"]) if r["end_seconds"] is not None else None,
-                )
-                for r in chapter_rows
-            ]
+                chapter_rows = conn.execute(
+                    "SELECT position, title, start_seconds, end_seconds FROM chapters WHERE video_id = ? ORDER BY position",
+                    (video_id,),
+                ).fetchall()
+                chapters = [
+                    ChapterEntry(
+                        position=int(r["position"]),
+                        title=str(r["title"]),
+                        start_seconds=float(r["start_seconds"]),
+                        end_seconds=float(r["end_seconds"]) if r["end_seconds"] is not None else None,
+                    )
+                    for r in chapter_rows
+                ]
 
-            track_rows = conn.execute(
-                "SELECT lang, source, is_auto, format, file_path FROM subtitle_tracks WHERE video_id = ? ORDER BY is_auto, lang",
-                (video_id,),
-            ).fetchall()
-            tracks = [
-                SubtitleTrack(
-                    lang=str(r["lang"]),
-                    source=str(r["source"]),
-                    is_auto=bool(r["is_auto"]),
-                    format=str(r["format"]),
-                    file_path=Path(str(r["file_path"])),
-                )
-                for r in track_rows
-            ]
+                track_rows = conn.execute(
+                    "SELECT lang, source, is_auto, format, file_path FROM subtitle_tracks WHERE video_id = ? ORDER BY is_auto, lang",
+                    (video_id,),
+                ).fetchall()
+                tracks = [
+                    SubtitleTrack(
+                        lang=str(r["lang"]),
+                        source=str(r["source"]),
+                        is_auto=bool(r["is_auto"]),
+                        format=str(r["format"]),
+                        file_path=Path(str(r["file_path"])),
+                    )
+                    for r in track_rows
+                ]
 
-            seg_rows = conn.execute(
-                "SELECT segment_index, start_seconds, end_seconds, text FROM transcript_segments WHERE video_id = ? ORDER BY segment_index LIMIT 6",
-                (video_id,),
-            ).fetchall()
-            preview = [
-                TranscriptSegment(
-                    segment_index=int(r["segment_index"]),
-                    start_seconds=float(r["start_seconds"]),
-                    end_seconds=float(r["end_seconds"]),
-                    text=str(r["text"]),
-                )
-                for r in seg_rows
-            ]
+                seg_rows = conn.execute(
+                    "SELECT segment_index, start_seconds, end_seconds, text FROM transcript_segments WHERE video_id = ? ORDER BY segment_index LIMIT 6",
+                    (video_id,),
+                ).fetchall()
+                preview = [
+                    TranscriptSegment(
+                        segment_index=int(r["segment_index"]),
+                        start_seconds=float(r["start_seconds"]),
+                        end_seconds=float(r["end_seconds"]),
+                        text=str(r["text"]),
+                    )
+                    for r in seg_rows
+                ]
+        except FileNotFoundError:
+            return None
 
         return {
             "video": video,
@@ -642,100 +679,103 @@ class CatalogStore:
         fts_query = _fts_query(query)
         if not fts_query:
             return []
-        with self.connect() as conn:
-            if "chapters" in sources:
-                chapter_sql = """
-                    SELECT
-                        c.chapter_id,
-                        v.video_id,
-                        v.title,
-                        v.channel,
-                        v.webpage_url,
-                        v.output_path,
-                        c.start_seconds,
-                        COALESCE(c.end_seconds, v.duration_seconds, c.start_seconds + 60.0) AS end_seconds,
-                        c.title AS match_text,
-                        c.title AS context,
-                        bm25(chapter_fts) AS score
-                    FROM chapter_fts
-                    JOIN chapters c ON c.chapter_id = CAST(chapter_fts.chapter_id AS INTEGER)
-                    JOIN videos v ON v.video_id = chapter_fts.video_id
-                    WHERE chapter_fts MATCH ?
-                """
-                params: list[object] = [fts_query]
-                if channel:
-                    chapter_sql += " AND v.channel = ?"
-                    params.append(channel)
-                chapter_sql += " ORDER BY score, c.start_seconds LIMIT ?"
-                params.append(limit)
-                for row in conn.execute(chapter_sql, params):
-                    hits.append(
-                        ClipSearchHit(
-                            result_id=f"chapter:{row['chapter_id']}",
-                            source="chapters",
-                            video_id=str(row["video_id"]),
-                            title=str(row["title"]),
-                            channel=str(row["channel"]),
-                            webpage_url=str(row["webpage_url"]),
-                            start_seconds=float(row["start_seconds"]),
-                            end_seconds=float(row["end_seconds"]),
-                            score=float(row["score"]),
-                            match_text=str(row["match_text"]),
-                            context=str(row["context"]),
-                            output_path=Path(str(row["output_path"])) if row["output_path"] else None,
+        try:
+            with self.connect() as conn:
+                if "chapters" in sources:
+                    chapter_sql = """
+                        SELECT
+                            c.chapter_id,
+                            v.video_id,
+                            v.title,
+                            v.channel,
+                            v.webpage_url,
+                            v.output_path,
+                            c.start_seconds,
+                            COALESCE(c.end_seconds, v.duration_seconds, c.start_seconds + 60.0) AS end_seconds,
+                            c.title AS match_text,
+                            c.title AS context,
+                            bm25(chapter_fts) AS score
+                        FROM chapter_fts
+                        JOIN chapters c ON c.chapter_id = CAST(chapter_fts.chapter_id AS INTEGER)
+                        JOIN videos v ON v.video_id = chapter_fts.video_id
+                        WHERE chapter_fts MATCH ?
+                    """
+                    params: list[object] = [fts_query]
+                    if channel:
+                        chapter_sql += " AND v.channel = ?"
+                        params.append(channel)
+                    chapter_sql += " ORDER BY score, c.start_seconds LIMIT ?"
+                    params.append(limit)
+                    for row in conn.execute(chapter_sql, params):
+                        hits.append(
+                            ClipSearchHit(
+                                result_id=f"chapter:{row['chapter_id']}",
+                                source="chapters",
+                                video_id=str(row["video_id"]),
+                                title=str(row["title"]),
+                                channel=str(row["channel"]),
+                                webpage_url=str(row["webpage_url"]),
+                                start_seconds=float(row["start_seconds"]),
+                                end_seconds=float(row["end_seconds"]),
+                                score=float(row["score"]),
+                                match_text=str(row["match_text"]),
+                                context=str(row["context"]),
+                                output_path=Path(str(row["output_path"])) if row["output_path"] else None,
+                            )
                         )
-                    )
-            if "transcript" in sources:
-                transcript_sql = """
-                    SELECT
-                        t.segment_id,
-                        v.video_id,
-                        v.title,
-                        v.channel,
-                        v.webpage_url,
-                        v.output_path,
-                        t.start_seconds,
-                        t.end_seconds,
-                        t.text AS match_text,
-                        snippet(transcript_fts, 2, '[', ']', ' ... ', 12) AS context,
-                        bm25(transcript_fts) AS score
-                    FROM transcript_fts
-                    JOIN transcript_segments t ON t.segment_id = CAST(transcript_fts.segment_id AS INTEGER)
-                    JOIN videos v ON v.video_id = transcript_fts.video_id
-                    LEFT JOIN subtitle_tracks st ON st.track_id = t.track_id
-                    WHERE transcript_fts MATCH ?
-                """
-                params = [fts_query]
-                if channel:
-                    transcript_sql += " AND v.channel = ?"
-                    params.append(channel)
-                if language:
-                    operator, pattern = _language_match_clause(language)
-                    transcript_sql += f" AND st.lang {operator} ?"
-                    params.append(pattern)
-                transcript_sql += " ORDER BY score, t.start_seconds LIMIT ?"
-                params.append(limit)
-                for row in conn.execute(transcript_sql, params):
-                    hits.append(
-                        ClipSearchHit(
-                            result_id=f"transcript:{row['segment_id']}",
-                            source="transcript",
-                            video_id=str(row["video_id"]),
-                            title=str(row["title"]),
-                            channel=str(row["channel"]),
-                            webpage_url=str(row["webpage_url"]),
-                            start_seconds=float(row["start_seconds"]),
-                            end_seconds=float(row["end_seconds"]),
-                            score=float(row["score"]),
-                            match_text=str(row["match_text"]),
-                            context=str(row["context"]),
-                            output_path=Path(str(row["output_path"])) if row["output_path"] else None,
+                if "transcript" in sources:
+                    transcript_sql = """
+                        SELECT
+                            t.segment_id,
+                            v.video_id,
+                            v.title,
+                            v.channel,
+                            v.webpage_url,
+                            v.output_path,
+                            t.start_seconds,
+                            t.end_seconds,
+                            t.text AS match_text,
+                            snippet(transcript_fts, 2, '[', ']', ' ... ', 12) AS context,
+                            bm25(transcript_fts) AS score
+                        FROM transcript_fts
+                        JOIN transcript_segments t ON t.segment_id = CAST(transcript_fts.segment_id AS INTEGER)
+                        JOIN videos v ON v.video_id = transcript_fts.video_id
+                        LEFT JOIN subtitle_tracks st ON st.track_id = t.track_id
+                        WHERE transcript_fts MATCH ?
+                    """
+                    params = [fts_query]
+                    if channel:
+                        transcript_sql += " AND v.channel = ?"
+                        params.append(channel)
+                    if language:
+                        operator, pattern = _language_match_clause(language)
+                        transcript_sql += f" AND st.lang {operator} ?"
+                        params.append(pattern)
+                    transcript_sql += " ORDER BY score, t.start_seconds LIMIT ?"
+                    params.append(limit)
+                    for row in conn.execute(transcript_sql, params):
+                        hits.append(
+                            ClipSearchHit(
+                                result_id=f"transcript:{row['segment_id']}",
+                                source="transcript",
+                                video_id=str(row["video_id"]),
+                                title=str(row["title"]),
+                                channel=str(row["channel"]),
+                                webpage_url=str(row["webpage_url"]),
+                                start_seconds=float(row["start_seconds"]),
+                                end_seconds=float(row["end_seconds"]),
+                                score=float(row["score"]),
+                                match_text=str(row["match_text"]),
+                                context=str(row["context"]),
+                                output_path=Path(str(row["output_path"])) if row["output_path"] else None,
+                            )
                         )
-                    )
+        except FileNotFoundError:
+            return []
         hits.sort(key=lambda item: (item.score, item.source, item.start_seconds))
         return hits[:limit]
 
-    def get_clip_hit(self, result_id: str, *, readonly: bool = False) -> ClipSearchHit | None:
+    def get_clip_hit(self, result_id: str, *, readonly: bool | None = None) -> ClipSearchHit | None:
         if ":" not in result_id:
             return None
         source, raw_id = result_id.split(":", 1)

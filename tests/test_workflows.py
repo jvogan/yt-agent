@@ -220,7 +220,10 @@ def test_index_add_requires_fetch_subs_for_auto_subs(settings, monkeypatch) -> N
 
 def test_clips_grab_supports_explicit_range_dry_run(settings, monkeypatch) -> None:
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    _seed_catalog_video(settings)
+    media_path = settings.download_root / "Channel" / "file.mp4"
+    media_path.parent.mkdir(parents=True, exist_ok=True)
+    media_path.write_bytes(b"video")
+    _seed_catalog_video(settings, output_path=media_path)
 
     result = runner.invoke(
         app,
@@ -248,6 +251,30 @@ def test_clips_grab_supports_explicit_range_dry_run(settings, monkeypatch) -> No
     assert payload["end_seconds"] == 12.0
     assert payload["output_path"].endswith(".mp4")
     assert not any(settings.clips_root.rglob("*")) if settings.clips_root.exists() else True
+
+
+def test_read_only_catalog_commands_do_not_create_catalog(settings, monkeypatch) -> None:
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+
+    library_result = runner.invoke(app, ["library", "list", "--output", "json"])
+    clips_result = runner.invoke(app, ["clips", "search", "demo", "--output", "json"])
+
+    assert library_result.exit_code == 0
+    assert json.loads(library_result.stdout) == []
+    assert clips_result.exit_code == 0
+    assert json.loads(clips_result.stdout) == []
+    assert not settings.catalog_file.exists()
+
+
+def test_library_show_missing_catalog_does_not_create_catalog(settings, monkeypatch) -> None:
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+
+    result = runner.invoke(app, ["library", "show", "abc123def45", "--output", "json"])
+
+    assert result.exit_code == 4
+    payload = json.loads(result.stderr)
+    assert payload["message"] == "Video id 'abc123def45' is not in the catalog."
+    assert not settings.catalog_file.exists()
 
 
 def test_clips_grab_rejects_mixed_locator_modes(settings, monkeypatch) -> None:

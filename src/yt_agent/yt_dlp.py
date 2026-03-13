@@ -194,7 +194,9 @@ def download_target(
         args.append("--embed-thumbnail")
 
     if fetch_subs:
-        args.append("--write-auto-subs" if auto_subs else "--write-subs")
+        args.append("--write-subs")
+        if auto_subs:
+            args.append("--write-auto-subs")
         args.extend(["--sub-langs", settings.subtitle_languages])
 
     args.append(target.info.webpage_url)

@@ -241,7 +241,7 @@ def test_download_target_fetch_subs_appends_write_subs(monkeypatch, tmp_path) ->
     assert "--sub-langs" in args
 
 
-def test_download_target_auto_subs_appends_write_auto_subs(monkeypatch, tmp_path) -> None:
+def test_download_target_auto_subs_keeps_manual_subs_and_adds_auto_fallback(monkeypatch, tmp_path) -> None:
     settings = _make_settings(tmp_path)
     captured: list[list[str]] = []
 
@@ -255,7 +255,7 @@ def test_download_target_auto_subs_appends_write_auto_subs(monkeypatch, tmp_path
     download_target(_make_target(), settings, fetch_subs=True, auto_subs=True)
     args = captured[0]
     assert "--write-auto-subs" in args
-    assert "--write-subs" not in args
+    assert "--write-subs" in args
 
 
 def test_download_target_no_subtitle_flags_by_default(monkeypatch, tmp_path) -> None:
