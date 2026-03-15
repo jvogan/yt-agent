@@ -325,4 +325,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution expectations and [THIRD_
 
 ---
 
-`youtube-cli` is shipped as a transitional alias during the `0.2.x` release line and will be removed in a future minor release.
+`youtube-cli` is shipped as a transitional alias and will be removed in a future minor release.
