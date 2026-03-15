@@ -8,7 +8,7 @@ Terminal-first YouTube download, catalog, and clip workflows for humans and codi
 
 ## Quickstart
 
-Install `yt-dlp` first. That is the only required runtime for basic search and download. Add `ffmpeg` later for clip extraction and `fzf` later for multi-select convenience.
+Install `yt-dlp` first. That is the only required runtime for basic search and download. Add `ffmpeg` for clip extraction and `fzf` for multi-select convenience when you need them.
 
 ```bash
 # macOS
@@ -71,10 +71,10 @@ docker run --rm -it \
 
 ## Choose Your Path
 
-- I already have a YouTube URL.
-- I want to search or curate a playlist.
-- I want to index a library and cut clips.
-- I want to drive this from Codex, Claude Code, Gemini CLI, opencode, or antigraviti.
+- [I already have a YouTube URL](#direct-download)
+- [I want to search or curate a playlist](#search-and-curate)
+- [I want to index a library and cut clips](#find-and-extract-clips)
+- [I want to drive this from Codex, Claude Code, Gemini CLI, opencode, or antigraviti](#agent-friendly-surface)
 
 ## Core Workflows
 
