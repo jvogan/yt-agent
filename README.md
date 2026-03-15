@@ -167,7 +167,27 @@ yt-agent tui
 
 `yt-agent doctor` shows what tools are installed and where data lives:
 
-![Doctor screenshot](assets/screenshots/doctor.png)
+![Doctor screenshot](assets/screenshots/doctor-updated.png)
+
+`yt-agent history` shows recent downloads with channel and timestamp:
+
+![History screenshot](assets/screenshots/history.png)
+
+`yt-agent library channels` lists all channels in your local catalog:
+
+![Library channels screenshot](assets/screenshots/library-channels.png)
+
+`yt-agent export --format json` streams the full catalog as structured JSON:
+
+![Export JSON screenshot](assets/screenshots/export-json.png)
+
+`yt-agent cleanup --dry-run` previews what would be removed without touching files:
+
+![Cleanup dry-run screenshot](assets/screenshots/cleanup-dry-run.png)
+
+`yt-agent --verbose` surfaces debug-level SQL and lifecycle events:
+
+![Verbose output screenshot](assets/screenshots/verbose.png)
 
 `yt-agent search` prints normalized results in a clean table:
 
