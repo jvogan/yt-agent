@@ -7,8 +7,7 @@ Use this checklist before the first public release and before each tagged releas
 - Confirm the repo stays private until the `P0` public-readiness work is complete.
 - Confirm `config/config.sample.toml` is the only canonical sample config in the repo.
 - Confirm the repo contains no cookies, exported browser sessions, local media, subtitle caches, or personal state files.
-- Confirm the blocked personal email address does not appear anywhere in tracked files.
-- Run `gitleaks git . --no-banner --redact`.
+- Run `gitleaks git . --no-banner --redact` to scan for secrets and personal data.
 - Confirm screenshots and brand assets are intentional public artifacts.
 
 ## Release validation

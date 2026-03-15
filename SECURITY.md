@@ -19,7 +19,7 @@ Security-sensitive areas include:
 
 The repository CI checks both tracked files and git history for obvious leaks:
 
-- tracked-file hygiene blocks personal email leakage and local state artifacts
+- CI hygiene checks block local state artifacts (`.env`, `cookies.txt`, `.sqlite`, `.jsonl`) from being tracked
 - `gitleaks` scans repository history for hardcoded secrets before changes are merged
 
 If you discover a real leaked credential, rotate it first and avoid posting the secret itself in issues or reports.

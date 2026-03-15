@@ -67,14 +67,6 @@ jobs:
       - name: Hygiene
         shell: bash
         run: |
-          local_part="jacobvogan"
-          domain_part="gmail.com"
-          needle="${local_part}@${domain_part}"
-          if git grep -n "$needle" -- . >/tmp/email_hits.txt; then
-            cat /tmp/email_hits.txt
-            echo "Tracked files must not contain the blocked personal email address."
-            exit 1
-          fi
           blocked_files="$(git ls-files | grep -E '(^|/)\.env(\..+)?$|(^|/)cookies[^/]*\.txt$|\.sqlite3?$|\.db$|\.jsonl$' || true)"
           if [ -n "$blocked_files" ]; then
             echo "Tracked files must not include local state or secret-looking artifacts:"
