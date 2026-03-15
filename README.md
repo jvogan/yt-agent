@@ -2,6 +2,9 @@
 
 ![yt-agent hero](assets/brand/yt-agent-hero.png)
 
+An Agent friendly YouTube skill. Point Anthropic's Claude Code, OpenAI's Codex, Google's Gemini, and more, at this repo and then have your preferred AI search, download, and process YouTube vids from terminal. 
+_______________________________________
+
 Terminal-first YouTube download, catalog, and clip workflows for humans and coding agents.
 
 `yt-agent` is built on `yt-dlp`, local sidecar files, SQLite FTS, and a small Textual catalog browser. It works well for direct human use and for coding agents that need structured, scriptable output.
