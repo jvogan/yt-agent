@@ -68,7 +68,7 @@ The format is inspired by Keep a Changelog, and this project follows pre-1.0 sem
 - Expanded CI to a multi-platform, multi-Python matrix and added distribution build checks.
 - Reworked the README around quickstart, golden paths, support matrix, and responsible-use guidance.
 - Clarified that the TUI is a read-mostly catalog browser.
-- Kept `youtube-cli` as a transitional alias for the `0.2.x` line.
+- Shipped `youtube-cli` as a transitional alias for the `0.2.x` line (removed in `0.3.x`).
 
 ### Removed
 

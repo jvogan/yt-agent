@@ -19,14 +19,13 @@ Use this checklist before the first public release and before each tagged releas
 - Run `uv build`.
 - Run `uv run --with twine twine check dist/*`.
 - Run `uv tool run --from . yt-agent --help`.
-- Run `uv tool run --from . youtube-cli --help`.
 - Confirm the GitHub Actions `Secret Scan` job passed on the release candidate branch or `main`.
 
 ## Documentation check
 
 - README quickstart works from a clean machine.
 - Install guidance covers `uv`, `pipx`, `yt-dlp`, `ffmpeg`, and `fzf`.
-- The `youtube-cli` alias is documented as transitional.
+- Confirm `youtube-cli` is no longer installed (entry point was removed in 0.3.x).
 - Platform support is explicit: macOS and Linux first-class, Windows experimental.
 - The public-use note is explicit about non-affiliation, rights, platform terms, and local law.
 

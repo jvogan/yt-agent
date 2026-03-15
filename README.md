@@ -322,7 +322,3 @@ uv build
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution expectations and [THIRD_PARTY.md](THIRD_PARTY.md) for upstream acknowledgements.
-
----
-
-`youtube-cli` is shipped as a transitional alias and will be removed in a future minor release.

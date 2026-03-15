@@ -41,7 +41,7 @@ This matrix describes what `yt-agent` is intended to support today, not every co
 
 ## Agent notes
 
-- `youtube-cli` remains available as a transitional alias and will be removed in a future minor release.
+- The `youtube-cli` transitional alias has been removed. Use `yt-agent` exclusively.
 - In JSON mode, commands that would otherwise prompt should be given `--select`.
 - Clip search results are useful handles, but explicit clip extraction via `--video-id`, `--start-seconds`, and `--end-seconds` is the most durable automation path.
 

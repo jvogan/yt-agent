@@ -98,7 +98,6 @@ jobs:
         run: |
           uv run yt-agent --version
           uv run yt-agent --help
-          uv run youtube-cli --help
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -116,4 +115,3 @@ jobs:
       - name: Install smoke
         run: |
           uv tool run --from . yt-agent --help
-          uv tool run --from . youtube-cli --help
