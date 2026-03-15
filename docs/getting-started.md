@@ -86,7 +86,7 @@ The generated config uses the same defaults as [`config/config.sample.toml`](../
 ## Shell Completion
 
 ```bash
-yt-agent --install-completion
+yt-agent completions install
 ```
 
 Run that command from the shell you want to configure. The detailed guide covers the generated file locations, verification commands, and troubleshooting for `bash`, `zsh`, and `fish`.

@@ -4,7 +4,7 @@
 
 Please do not open a public issue for a suspected security vulnerability.
 
-Use GitHub private vulnerability reporting if it is enabled for the repository. If that is not available, open a normal issue only for low-risk hardening suggestions that do not include exploit details.
+Use GitHub's private vulnerability reporting if it is enabled for the repository. If private reporting is not available, contact the maintainer directly rather than opening a public issue — even for low-risk hardening suggestions.
 
 ## Scope
 

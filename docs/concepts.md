@@ -46,7 +46,7 @@ Use `--audio` for audio-only downloads and `--fetch-subs` when subtitle sidecars
 
 ## Transcript and chapter search
 
-`clips search` is deterministic in `0.2.x`.
+`clips search` is deterministic.
 
 - Chapter matches come from native chapter data in `.info.json`
 - Transcript matches come from indexed subtitle segments

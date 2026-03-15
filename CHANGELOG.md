@@ -41,7 +41,7 @@ The format is inspired by Keep a Changelog, and this project follows pre-1.0 sem
 ### CI
 
 - Added a tag-triggered PyPI release workflow.
-- Reworked CI with separate lint and security stages, Windows coverage in the test matrix, Codecov uploads, and stricter build ordering.
+- Reworked CI with separate lint and security stages, expanded macOS coverage in the test matrix, Codecov uploads, and stricter build ordering.
 - Raised the coverage floor to 85%, expanded property-based and module coverage, and enabled broader Ruff rule sets.
 
 ### Documentation

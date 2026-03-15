@@ -97,6 +97,48 @@ yt-agent library remove abc123def45 --dry-run --output json
 
 Recipe: [examples/agents/library-curator.md](../examples/agents/library-curator.md)
 
+### 5. Data management
+
+Use these commands when you need to back up the catalog, migrate it to another machine, review download history, or reclaim disk space.
+
+**Export and import**
+
+`export` writes the full catalog to a portable JSON Lines file. `import` merges a previously exported file back into a catalog. Both support `--output json` for machine-readable feedback.
+
+```bash
+yt-agent export ~/backups/catalog-$(date +%Y%m%d).jsonl --output json
+yt-agent import ~/backups/catalog-20260314.jsonl --dry-run --output json
+# wait for approval
+yt-agent import ~/backups/catalog-20260314.jsonl --output json
+```
+
+Export JSON envelope fields: `schema_version`, `command`, `status`, `summary` (with `exported` count), `warnings`, `errors`.
+
+Import JSON envelope fields: `schema_version`, `command`, `status`, `summary` (with `imported`, `skipped`, `failed` counts), `warnings`, `errors`.
+
+**History**
+
+`history` is read-only and reports manifest-backed downloads. Use it to audit what was downloaded and when without touching the catalog.
+
+```bash
+yt-agent history --limit 20 --output json
+yt-agent history --channel "Channel Name" --output json
+```
+
+History rows include `video_id`, `title`, `channel`, `upload_date`, `download_timestamp`, and `output_path`.
+
+**Cleanup**
+
+`cleanup` removes orphaned subtitle cache directories, empty channel directories, and leftover `.part` files. Always preview first.
+
+```bash
+yt-agent cleanup --dry-run --output json
+# wait for approval
+yt-agent cleanup --quiet --output json
+```
+
+Cleanup JSON envelope includes a `removed` list with `path` and `reason` for each item that would be or was removed.
+
 ## Output notes
 
 - Read commands return structured JSON when `--output json` is used.

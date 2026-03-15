@@ -1,13 +1,13 @@
 # Shell Completion
 
-`yt-agent` uses Typer's built-in shell completion installer. Run the install command from the shell you want to configure, because `yt-agent --install-completion` installs completion for the current shell only.
+`yt-agent` ships a `completions install` subcommand. Run it from the shell you want to configure, because `yt-agent completions install` installs completion for the current shell only.
 
 ## Common install flow
 
 Run this from the shell you want to enable:
 
 ```bash
-yt-agent --install-completion
+yt-agent completions install
 ```
 
 After it finishes:
@@ -21,7 +21,7 @@ After it finishes:
 Run the installer from a `bash` session:
 
 ```bash
-yt-agent --install-completion
+yt-agent completions install
 ```
 
 Typer writes:
@@ -45,7 +45,7 @@ complete -p yt-agent
 Run the installer from a `zsh` session:
 
 ```bash
-yt-agent --install-completion
+yt-agent completions install
 ```
 
 Typer writes:
@@ -70,7 +70,7 @@ whence -w _yt-agent
 Run the installer from a `fish` session:
 
 ```bash
-yt-agent --install-completion
+yt-agent completions install
 ```
 
 Typer writes:
@@ -90,8 +90,8 @@ complete --do-complete "yt-agent do"
 
 ## Troubleshooting
 
-- Install from the target shell. Running `yt-agent --install-completion` from `zsh` configures `zsh`, not `bash` or `fish`.
-- If the shell restarts but completion still does not load, inspect the generated script with `yt-agent --show-completion` from that same shell.
+- Install from the target shell. Running `yt-agent completions install` from `zsh` configures `zsh`, not `bash` or `fish`.
+- If the shell restarts but completion still does not load, inspect the generated script with `yt-agent completions show` from that same shell.
 - If `yt-agent` is not found at install time, fix your PATH first and confirm with `yt-agent doctor`.
 - If Bash still does not load completion after install, your terminal may be starting Bash as a login shell that skips `~/.bashrc`. Add `[[ -f ~/.bashrc ]] && source ~/.bashrc` to `~/.bash_profile`, then start a new shell.
 - If Zsh already manages `compinit` through a framework or dotfiles setup, keep `~/.zfunc` in `fpath` and avoid adding a second completion init path by hand.

@@ -28,7 +28,7 @@ If `yt-dlp` is missing, install it first:
 Shell completion setup:
 
 ```bash
-yt-agent --install-completion
+yt-agent completions install
 ```
 
 ## Core contract
@@ -95,9 +95,9 @@ yt-agent cleanup --quiet --output json
 - Clips: `clips search`, `clips show`, `clips grab`
 - Library: `library stats`, `library list`, `library search`, `library show`, `library channels`, `library playlists`, `library remove`
 - Local state: `history`, `cleanup`, `config init`, `config path`, `config validate`
+- Data portability: `export`, `import`
 - Interactive UI: `tui`
-- Shell setup: `yt-agent --install-completion`
-- This repo snapshot does not expose `export` or `import` subcommands. Do not assume they exist unless `yt-agent --help` in the target environment shows them.
+- Shell setup: `yt-agent completions install`
 
 ## Safety notes
 
