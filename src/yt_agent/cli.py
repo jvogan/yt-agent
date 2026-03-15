@@ -38,6 +38,7 @@ from yt_agent.selector import parse_selection, select_results
 
 APP_HELP = "Terminal-first YouTube search, download, catalog, and clip tooling."
 READ_OUTPUT_HELP = "Render output as table, json, or plain text."
+DRY_RUN_HELP = "Preview the operation without writing changes."
 OUTPUT_MODES = {"table", "json", "plain"}
 MUTATION_SCHEMA_VERSION = 1
 
@@ -143,6 +144,7 @@ launch_tui = cast(Callable[..., Any], None)
 
 __all__ = [
     "DownloadOperationItem",
+    "DRY_RUN_HELP",
     "MUTATION_SCHEMA_VERSION",
     "OUTPUT_MODES",
     "READ_OUTPUT_HELP",
@@ -636,7 +638,7 @@ def _remove_cleanup_candidates(candidates: dict[str, list[Path]]) -> None:
             continue
 
 
-@app.command()
+@app.command(help="Show recent downloads from the manifest.")
 def history(
     limit: int = typer.Option(20, "--limit", min=1, help="Maximum downloads to show."),
     channel: str | None = typer.Option(None, "--channel", help="Only show one channel."),
@@ -659,10 +661,10 @@ def history(
     _run_guarded(_command, output_mode=output)
 
 
-@app.command()
+@app.command(help="Remove orphaned caches, empty directories, and partial downloads.")
 def cleanup(
     dry_run: bool = typer.Option(
-        False, "--dry-run", help="List orphaned artifacts without removing them."
+        False, "--dry-run", help=DRY_RUN_HELP
     ),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce non-essential output."),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
@@ -684,7 +686,7 @@ def cleanup(
     _run_guarded(_command, output_mode=output)
 
 
-@app.command()
+@app.command(help="Check required and optional runtime dependencies.")
 def doctor(
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
@@ -700,7 +702,7 @@ def doctor(
     _run_guarded(_command, output_mode=output)
 
 
-@app.command()
+@app.command(help="Search YouTube and print normalized results.")
 def search(
     query: str,
     limit: int | None = typer.Option(None, "--limit", min=1, help="Maximum result count."),
@@ -723,7 +725,7 @@ def search(
     _run_guarded(_command, output_mode=output)
 
 
-@app.command()
+@app.command(help="Search YouTube and interactively select result URLs.")
 def pick(
     query: str,
     limit: int | None = typer.Option(None, "--limit", min=1, help="Maximum result count."),
@@ -759,7 +761,7 @@ def pick(
     _run_guarded(_command, output_mode=output)
 
 
-@app.command()
+@app.command(help="Print normalized metadata for a target without downloading.")
 def info(
     target: str,
     entries: bool = typer.Option(
@@ -779,10 +781,10 @@ def info(
     _run_guarded(_command, output_mode=output)
 
 
-@app.command()
+@app.command(help="Download videos into the organized local library.")
 def download(
     targets: list[str] = typer.Argument(
-        default=None, help="Video URLs, playlist URLs, or YouTube video ids."
+        default=None, help="Video URLs, playlist URLs, or YouTube video IDs."
     ),
     from_file: Path | None = typer.Option(
         None,
@@ -807,7 +809,7 @@ def download(
         help="Include auto-generated subtitles (requires --fetch-subs).",
     ),
     dry_run: bool = typer.Option(
-        False, "--dry-run", help="Preview resolved downloads without writing files."
+        False, "--dry-run", help=DRY_RUN_HELP
     ),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce non-essential output."),
     use_fzf: bool = typer.Option(False, "--fzf", help="Use fzf for playlist entry selection."),
@@ -846,7 +848,7 @@ def download(
     _run_guarded(_command, output_mode=output)
 
 
-@app.command()
+@app.command(help="Search, select, and download in one flow.")
 def grab(
     query: str,
     limit: int | None = typer.Option(None, "--limit", min=1, help="Maximum result count."),
@@ -862,7 +864,7 @@ def grab(
         help="Include auto-generated subtitles (requires --fetch-subs).",
     ),
     dry_run: bool = typer.Option(
-        False, "--dry-run", help="Preview selected downloads without writing files."
+        False, "--dry-run", help=DRY_RUN_HELP
     ),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce non-essential output."),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
@@ -900,7 +902,7 @@ def grab(
     _run_guarded(_command, output_mode=output)
 
 
-@config_app.command("init")
+@config_app.command("init", help="Write a starter config file to the active config path.")
 def config_init_command(
     force: bool = typer.Option(False, "--force", help="Overwrite an existing config file."),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
@@ -925,7 +927,7 @@ def config_init_command(
     _run_guarded(_command)
 
 
-@config_app.command("path")
+@config_app.command("path", help="Show the active config and data paths.")
 def config_path_command(
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
@@ -959,7 +961,7 @@ def config_path_command(
     _run_guarded(_command, output_mode=output)
 
 
-@config_app.command("validate")
+@config_app.command("validate", help="Validate the active config file and report any errors.")
 def config_validate_command(
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
 ) -> None:
@@ -976,7 +978,10 @@ def config_validate_command(
     _run_guarded(_command)
 
 
-@index_app.command("refresh")
+@index_app.command(
+    "refresh",
+    help="Backfill or refresh the local catalog from the download manifest.",
+)
 def index_refresh_command(
     fetch_subs: bool = typer.Option(
         False,
@@ -989,11 +994,9 @@ def index_refresh_command(
         help="Allow automatic subtitles when manuals are missing.",
     ),
     lang: str | None = typer.Option(
-        None, "--lang", help="Preferred subtitle language expression, e.g. en.*"
+        None, "--lang", help="Preferred subtitle language expression, such as en.*."
     ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Preview refresh work without writing the catalog."
-    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help=DRY_RUN_HELP),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce non-essential output."),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
@@ -1034,7 +1037,7 @@ def index_refresh_command(
     _run_guarded(_command, output_mode=output)
 
 
-@index_app.command("add")
+@index_app.command("add", help="Index a specific video or playlist target into the local catalog.")
 def index_add_command(
     target: str,
     fetch_subs: bool = typer.Option(
@@ -1048,11 +1051,9 @@ def index_add_command(
         help="Allow automatic subtitles when manuals are missing.",
     ),
     lang: str | None = typer.Option(
-        None, "--lang", help="Preferred subtitle language expression, e.g. en.*"
+        None, "--lang", help="Preferred subtitle language expression, such as en.*."
     ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Preview target indexing without writing the catalog."
-    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help=DRY_RUN_HELP),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce non-essential output."),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
@@ -1098,7 +1099,10 @@ def index_add_command(
     _run_guarded(_command, output_mode=output)
 
 
-@clips_app.command("search")
+@clips_app.command(
+    "search",
+    help="Search indexed transcript segments and chapters for clip-worthy matches.",
+)
 def clips_search_command(
     query: str,
     source: str = typer.Option(
@@ -1106,7 +1110,7 @@ def clips_search_command(
     ),
     channel: str | None = typer.Option(None, "--channel", help="Limit results to one channel."),
     lang: str | None = typer.Option(
-        None, "--lang", help="Optional transcript language filter, e.g. en% or en.*"
+        None, "--lang", help="Optional transcript language filter, such as en% or en.*."
     ),
     limit: int = typer.Option(10, "--limit", min=1, help="Maximum clip hits to show."),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
@@ -1129,7 +1133,7 @@ def clips_search_command(
     _run_guarded(_command, output_mode=output)
 
 
-@clips_app.command("show")
+@clips_app.command("show", help="Show a specific clip-search hit with context.")
 def clips_show_command(
     result_id: str,
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
@@ -1183,13 +1187,13 @@ def clips_show_command(
     _run_guarded(_command, output_mode=output)
 
 
-@clips_app.command("grab")
+@clips_app.command("grab", help="Extract a clip from a cataloged chapter or transcript hit.")
 def clips_grab_command(
     result_id: str | None = typer.Argument(
-        None, help="Clip search result id like transcript:12 or chapter:3."
+        None, help="Clip search result ID like transcript:12 or chapter:3."
     ),
     video_id: str | None = typer.Option(
-        None, "--video-id", help="Cataloged video id for explicit clip extraction."
+        None, "--video-id", help="Cataloged video ID for explicit clip extraction."
     ),
     start_seconds: float | None = typer.Option(
         None, "--start-seconds", help="Explicit clip start in seconds."
@@ -1207,9 +1211,7 @@ def clips_grab_command(
         "--remote-fallback",
         help="Fallback to yt-dlp section download if local media is missing.",
     ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Preview the clip extraction without writing files."
-    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help=DRY_RUN_HELP),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce non-essential output."),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
@@ -1325,12 +1327,12 @@ def clips_grab_command(
     _run_guarded(_command, output_mode=output)
 
 
-@library_app.command("list")
+@library_app.command("list", help="List cataloged library entries.")
 def library_list_command(
     channel: str | None = typer.Option(
         None, "--channel", help="Only show videos from one channel."
     ),
-    playlist: str | None = typer.Option(None, "--playlist", help="Filter by playlist id or title."),
+    playlist: str | None = typer.Option(None, "--playlist", help="Filter by playlist ID or title."),
     has_transcript: bool = typer.Option(
         False, "--has-transcript", help="Only show videos with indexed transcripts."
     ),
@@ -1370,11 +1372,14 @@ def library_list_command(
     _run_guarded(_command, output_mode=output)
 
 
-@library_app.command("search")
+@library_app.command(
+    "search",
+    help="Search the local library catalog by title, channel, or video ID.",
+)
 def library_search_command(
     query: str,
     channel: str | None = typer.Option(None, "--channel", help="Only search one channel."),
-    playlist: str | None = typer.Option(None, "--playlist", help="Filter by playlist id or title."),
+    playlist: str | None = typer.Option(None, "--playlist", help="Filter by playlist ID or title."),
     has_transcript: bool = typer.Option(
         False, "--has-transcript", help="Only show videos with indexed transcripts."
     ),
@@ -1391,7 +1396,7 @@ def library_search_command(
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
 ) -> None:
-    """Search the local library catalog by title, channel, or video id."""
+    """Search the local library catalog by title, channel, or video ID."""
 
     def _command() -> None:
         settings = _load_settings(config)
@@ -1415,7 +1420,7 @@ def library_search_command(
     _run_guarded(_command, output_mode=output)
 
 
-@library_app.command("show")
+@library_app.command("show", help="Show one cataloged video with chapters and transcript preview.")
 def library_show_command(
     video_id: str,
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
@@ -1431,7 +1436,7 @@ def library_show_command(
     _run_guarded(_command, output_mode=output)
 
 
-@library_app.command("stats")
+@library_app.command("stats", help="Show high-level counts for the local catalog.")
 def library_stats_command(
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
@@ -1459,7 +1464,7 @@ def library_stats_command(
     _run_guarded(_command, output_mode=output)
 
 
-@library_app.command("channels")
+@library_app.command("channels", help="List distinct channels in the catalog.")
 def library_channels_command(
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
@@ -1493,7 +1498,7 @@ def library_channels_command(
     _run_guarded(_command, output_mode=output)
 
 
-@library_app.command("playlists")
+@library_app.command("playlists", help="List indexed playlists with video counts.")
 def library_playlists_command(
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
@@ -1542,14 +1547,15 @@ def library_playlists_command(
     _run_guarded(_command, output_mode=output)
 
 
-@library_app.command("remove")
+@library_app.command(
+    "remove",
+    help="Remove videos from the catalog. Media files on disk are not affected.",
+)
 def library_remove_command(
     video_ids: list[str] = typer.Argument(
         ..., help="One or more video IDs to remove from the catalog."
     ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Preview catalog removals without writing changes."
-    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help=DRY_RUN_HELP),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
 ) -> None:
@@ -1579,7 +1585,7 @@ def library_remove_command(
     _run_guarded(_command, output_mode=output)
 
 
-@app.command()
+@app.command(help="Launch the Textual catalog browser.")
 def tui(
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
 ) -> None:
