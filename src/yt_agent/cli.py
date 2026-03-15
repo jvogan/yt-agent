@@ -648,11 +648,13 @@ _EXPORT_FORMAT_CHOICES = {"json", "csv"}
 
 @app.command(help="Export the local catalog to a JSON or CSV file.")
 def export(
-    dest: Path = typer.Argument(..., help="Output file path (.json or .csv)."),
+    dest: Path | None = typer.Option(
+        None, "--dest", help="Output file path (.json or .csv). Defaults to stdout."
+    ),
     format: str | None = typer.Option(  # noqa: A002
         None,
         "--format",
-        help="Export format: json or csv. Inferred from file extension if omitted.",
+        help="Export format: json or csv. Inferred from file extension; defaults to json.",
     ),
     limit: int = typer.Option(
         10000, "--limit", min=1, help="Maximum catalog entries to export."
@@ -660,14 +662,17 @@ def export(
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
 ) -> None:
-    """Export the local catalog to a JSON or CSV file."""
+    """Export the local catalog to a JSON or CSV file, or stdout when no --dest is given."""
 
     def _command() -> None:
         settings = _load_settings(config)
         resolved_format = format
         if resolved_format is None:
-            suffix = dest.suffix.lower().lstrip(".")
-            resolved_format = suffix if suffix in _EXPORT_FORMAT_CHOICES else "json"
+            if dest is not None:
+                suffix = dest.suffix.lower().lstrip(".")
+                resolved_format = suffix if suffix in _EXPORT_FORMAT_CHOICES else "json"
+            else:
+                resolved_format = "json"
         resolved_format = resolved_format.lower().strip()
         if resolved_format not in _EXPORT_FORMAT_CHOICES:
             raise InvalidInputError(
@@ -676,24 +681,31 @@ def export(
         store = _catalog(settings, readonly=True)
         videos = store.list_videos(limit=limit)
         rows = [_catalog_video_row(video) for video in videos]
-        try:
-            if resolved_format == "json":
-                dest.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+        if resolved_format == "json":
+            content = json.dumps(rows, indent=2)
+        else:
+            if rows:
+                fieldnames = list(rows[0].keys())
             else:
-                if rows:
-                    fieldnames = list(rows[0].keys())
-                else:
-                    fieldnames = [
-                        "video_id", "title", "channel", "upload_date",
-                        "duration", "duration_seconds", "webpage_url",
-                        "output_path", "has_local_media",
-                        "transcript_segments", "chapters", "playlists",
-                    ]
-                buf = io.StringIO()
-                writer = csv.DictWriter(buf, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(rows)
-                dest.write_text(buf.getvalue(), encoding="utf-8")
+                fieldnames = [
+                    "video_id", "title", "channel", "upload_date",
+                    "duration", "duration_seconds", "webpage_url",
+                    "output_path", "has_local_media",
+                    "transcript_segments", "chapters", "playlists",
+                ]
+            buf = io.StringIO()
+            writer = csv.DictWriter(buf, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+            content = buf.getvalue()
+        if dest is None:
+            sys.stdout.write(content)
+            if not content.endswith("\n"):
+                sys.stdout.write("\n")
+            sys.stdout.flush()
+            return
+        try:
+            dest.write_text(content, encoding="utf-8")
         except OSError as exc:
             raise StorageError(f"Could not write export file: {exc}") from exc
         payload = _mutation_payload(
@@ -1085,6 +1097,7 @@ def grab(
 @config_app.command("init", help="Write a starter config file to the active config path.")
 def config_init_command(
     force: bool = typer.Option(False, "--force", help="Overwrite an existing config file."),
+    output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
 ) -> None:
     """Write a starter config file to the active config path."""
@@ -1098,13 +1111,22 @@ def config_init_command(
             )
         settings.config_path.write_text(render_default_config(), encoding="utf-8")
         ensure_private_file(settings.config_path)
+        message = f"Wrote config: {settings.config_path}"
+        mode = _normalize_output_mode(output)
+        if mode == "json":
+            _print_json({
+                "status": "ok",
+                "config_path": str(settings.config_path),
+                "message": message,
+            })
+            return
         console.print(
-            f"Wrote config: {sanitize_terminal_text(settings.config_path)}",
+            sanitize_terminal_text(message),
             style="green",
             markup=False,
         )
 
-    _run_guarded(_command)
+    _run_guarded(_command, output_mode=output)
 
 
 @config_app.command("path", help="Show the active config and data paths.")
@@ -1143,19 +1165,28 @@ def config_path_command(
 
 @config_app.command("validate", help="Validate the active config file and report any errors.")
 def config_validate_command(
+    output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
 ) -> None:
     """Validate the active config file and report any errors."""
 
     def _command() -> None:
         settings = _load_settings(config)
+        mode = _normalize_output_mode(output)
+        if mode == "json":
+            _print_json({
+                "status": "ok",
+                "config_path": str(settings.config_path),
+                "valid": True,
+            })
+            return
         console.print(
             f"Config is valid: {sanitize_terminal_text(settings.config_path)}",
             style="green",
             markup=False,
         )
 
-    _run_guarded(_command)
+    _run_guarded(_command, output_mode=output)
 
 
 @index_app.command(
