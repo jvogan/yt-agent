@@ -2,48 +2,61 @@
 
 from __future__ import annotations
 
-import json
+import importlib
+import logging
+import os
 import shutil
-import sqlite3
 import sys
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, cast
 
 import typer
 from rich.console import Console
 from rich.table import Table
+from typer._completion_shared import get_completion_script
+from typer._completion_shared import install as typer_completion_install
 
 from yt_agent import __version__, yt_dlp
-from yt_agent.archive import ensure_archive_file, is_archived, load_archive_entries
-from yt_agent.catalog import CatalogStore
-from yt_agent.clips import extract_clip, extract_clip_for_range, plan_clip, plan_clip_for_range
+from yt_agent.archive import ensure_archive_file
 from yt_agent.config import Settings, load_settings, render_default_config
-from yt_agent.errors import DependencyError, ExitCode, ExternalCommandError, InvalidInputError, YtAgentError
-from yt_agent.indexer import IndexSummary, index_manifest_record, index_refresh, index_target
+from yt_agent.errors import (
+    DependencyError,
+    ExitCode,
+    ExternalCommandError,
+    InvalidInputError,
+    YtAgentError,
+)
+from yt_agent.library import sanitize_file_id
 from yt_agent.manifest import append_manifest_record, ensure_manifest_file, iter_manifest_records
-from yt_agent.models import CatalogVideo, ClipSearchHit, DownloadTarget, ManifestRecord, VideoInfo
+from yt_agent.models import DownloadTarget, VideoInfo
 from yt_agent.security import ensure_private_file, operation_lock, sanitize_terminal_text
 from yt_agent.selector import parse_selection, select_results
-from yt_agent.tui import launch_tui
 
 APP_HELP = "Terminal-first YouTube search, download, catalog, and clip tooling."
 READ_OUTPUT_HELP = "Render output as table, json, or plain text."
 OUTPUT_MODES = {"table", "json", "plain"}
 MUTATION_SCHEMA_VERSION = 1
 
+console = Console()
+error_console = Console(stderr=True)
+
 app = typer.Typer(help=APP_HELP, no_args_is_help=True)
 index_app = typer.Typer(help="Catalog indexing commands.")
 clips_app = typer.Typer(help="Transcript and chapter clip workflows.")
 library_app = typer.Typer(help="Local library browsing commands.")
 config_app = typer.Typer(help="Configuration helpers.")
+completions_app = typer.Typer(help="Shell completion helpers.")
 app.add_typer(index_app, name="index")
 app.add_typer(clips_app, name="clips")
 app.add_typer(library_app, name="library")
 app.add_typer(config_app, name="config")
+app.add_typer(completions_app, name="completions")
 
-console = Console()
-error_console = Console(stderr=True)
+logger = logging.getLogger("yt_agent")
 
 
 @dataclass(frozen=True)
@@ -55,105 +68,243 @@ class DownloadOperationItem:
     output_path: Path | None = None
     info_json_path: Path | None = None
     indexed: bool = False
-    index_summary: IndexSummary | None = None
+    index_summary: Any | None = None
     index_warning: str | None = None
     error_message: str | None = None
     stderr: str | None = None
 
 
-def _normalize_optional_output_mode(value: str | None) -> str | None:
-    if value is None:
-        return None
-    return _normalize_output_mode(value)
+_choose_results_impl = cast(Callable[..., Any], None)
+_download_targets_impl = cast(Callable[..., Any], None)
+_presence_flag_impl = cast(Callable[..., Any], None)
+_read_targets_from_file_impl = cast(Callable[..., Any], None)
+_require_noninteractive_json_selection_impl = cast(Callable[..., Any], None)
+_resolve_download_inputs_impl = cast(Callable[..., Any], None)
+_select_by_indexes_impl = cast(Callable[..., Any], None)
+_validate_clip_mode_impl = cast(Callable[..., Any], None)
+_validate_subtitle_flags_impl = cast(Callable[..., Any], None)
+_download_command_impl = cast(Callable[..., Any], None)
+_grab_command_impl = cast(Callable[..., Any], None)
+
+_build_info_payload = cast(Callable[..., Any], None)
+_catalog_video_row = cast(Callable[..., Any], None)
+_cleanup_payload = cast(Callable[..., Any], None)
+_clip_grab_payload = cast(Callable[..., Any], None)
+_clip_hit_row = cast(Callable[..., Any], None)
+_doctor_payload = cast(Callable[..., Any], None)
+_download_operation_item_payload = cast(Callable[..., Any], None)
+_download_operation_payload = cast(Callable[..., Any], None)
+_history_row = cast(Callable[..., Any], None)
+_index_payload = cast(Callable[..., Any], None)
+_index_summary_payload = cast(Callable[..., Any], None)
+_json_error_payload = cast(Callable[..., Any], None)
+_library_detail_payload = cast(Callable[..., Any], None)
+_library_remove_payload = cast(Callable[..., Any], None)
+_mutation_payload = cast(Callable[..., Any], None)
+_normalize_optional_output_mode = cast(Callable[..., Any], None)
+_normalize_output_mode = cast(Callable[..., Any], None)
+_pick_payload = cast(Callable[..., Any], None)
+_platform_status = cast(Callable[..., Any], None)
+_print_json = cast(Callable[..., Any], None)
+_print_json_error = cast(Callable[..., Any], None)
+_print_plain_mapping = cast(Callable[..., Any], None)
+_print_plain_rows = cast(Callable[..., Any], None)
+_render_cleanup_payload = cast(Callable[..., Any], None)
+_render_clip_grab_payload = cast(Callable[..., Any], None)
+_render_clip_hits = cast(Callable[..., Any], None)
+_render_doctor = cast(Callable[..., Any], None)
+_render_download_payload = cast(Callable[..., Any], None)
+_render_history_rows = cast(Callable[..., Any], None)
+_render_index_payload = cast(Callable[..., Any], None)
+_render_index_summary = cast(Callable[..., Any], None)
+_render_info_payload = cast(Callable[..., Any], None)
+_render_library_detail = cast(Callable[..., Any], None)
+_render_library_remove_payload = cast(Callable[..., Any], None)
+_render_library_rows = cast(Callable[..., Any], None)
+_render_pick_payload = cast(Callable[..., Any], None)
+_render_playlist_summary = cast(Callable[..., Any], None)
+_render_results = cast(Callable[..., Any], None)
+_tool_install_hint = cast(Callable[..., Any], None)
+_video_info_payload = cast(Callable[..., Any], None)
+_video_row = cast(Callable[..., Any], None)
+
+IndexSummary = cast(Callable[..., Any], None)
+index_manifest_record = cast(Callable[..., Any], None)
+index_refresh = cast(Callable[..., Any], None)
+index_target = cast(Callable[..., Any], None)
+
+extract_clip = cast(Callable[..., Any], None)
+extract_clip_for_range = cast(Callable[..., Any], None)
+plan_clip = cast(Callable[..., Any], None)
+plan_clip_for_range = cast(Callable[..., Any], None)
+
+CatalogStore = cast(Callable[..., Any], None)
+launch_tui = cast(Callable[..., Any], None)
+
+__all__ = [
+    "DownloadOperationItem",
+    "MUTATION_SCHEMA_VERSION",
+    "OUTPUT_MODES",
+    "READ_OUTPUT_HELP",
+    "_build_info_payload",
+    "_catalog_video_row",
+    "_cleanup_payload",
+    "_clip_grab_payload",
+    "_clip_hit_row",
+    "_doctor_payload",
+    "_download_operation_item_payload",
+    "_download_operation_payload",
+    "_history_row",
+    "_index_payload",
+    "_index_summary_payload",
+    "_json_error_payload",
+    "_library_detail_payload",
+    "_library_remove_payload",
+    "_mutation_payload",
+    "_normalize_optional_output_mode",
+    "_normalize_output_mode",
+    "_pick_payload",
+    "_platform_status",
+    "_print_json",
+    "_print_json_error",
+    "_print_plain_mapping",
+    "_print_plain_rows",
+    "_render_cleanup_payload",
+    "_render_clip_grab_payload",
+    "_render_clip_hits",
+    "_render_doctor",
+    "_render_download_payload",
+    "_render_history_rows",
+    "_render_index_payload",
+    "_render_index_summary",
+    "_render_info_payload",
+    "_render_library_detail",
+    "_render_library_remove_payload",
+    "_render_library_rows",
+    "_render_pick_payload",
+    "_render_playlist_summary",
+    "_render_results",
+    "_tool_install_hint",
+    "_video_info_payload",
+    "_video_row",
+    "console",
+    "error_console",
+]
 
 
-def _json_error_payload(
-    *,
-    exit_code: int,
-    error_type: str,
-    message: str,
-    stderr: str | None = None,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "schema_version": MUTATION_SCHEMA_VERSION,
-        "status": "error",
-        "exit_code": exit_code,
-        "error_type": error_type,
-        "message": message,
-    }
-    if stderr:
-        payload["stderr"] = stderr
-    return payload
+def _load_symbol(module_name: str, attr_name: str) -> Any:
+    module = importlib.import_module(module_name)
+    return getattr(module, attr_name)
 
 
-def _mutation_payload(
-    *,
-    command: str,
-    status: str,
-    summary: dict[str, Any],
-    warnings: list[Any] | None = None,
-    errors: list[Any] | None = None,
-    **payload: Any,
-) -> dict[str, Any]:
-    return {
-        "schema_version": MUTATION_SCHEMA_VERSION,
-        "command": command,
-        "status": status,
-        "summary": summary,
-        "warnings": warnings or [],
-        "errors": errors or [],
-        **payload,
-    }
+def _lazy_callable(module_name: str, attr_name: str) -> Callable[..., Any]:
+    def _wrapper(*args: Any, **kwargs: Any) -> Any:
+        return _load_symbol(module_name, attr_name)(*args, **kwargs)
+
+    _wrapper.__name__ = attr_name
+    _wrapper.__qualname__ = attr_name
+    _wrapper.__doc__ = f"Lazy wrapper for {module_name}.{attr_name}."
+    return _wrapper
+
+
+for _module_name, _bindings in (
+    (
+        "yt_agent.cli_download",
+        (
+            ("_choose_results_impl", "_choose_results"),
+            ("_download_targets_impl", "_download_targets"),
+            ("_presence_flag_impl", "_presence_flag"),
+            ("_read_targets_from_file_impl", "_read_targets_from_file"),
+            (
+                "_require_noninteractive_json_selection_impl",
+                "_require_noninteractive_json_selection",
+            ),
+            ("_resolve_download_inputs_impl", "_resolve_download_inputs"),
+            ("_select_by_indexes_impl", "_select_by_indexes"),
+            ("_validate_clip_mode_impl", "_validate_clip_mode"),
+            ("_validate_subtitle_flags_impl", "_validate_subtitle_flags"),
+            ("_download_command_impl", "download_command"),
+            ("_grab_command_impl", "grab_command"),
+        ),
+    ),
+    (
+        "yt_agent.cli_output",
+        (
+            ("_build_info_payload", "_build_info_payload"),
+            ("_catalog_video_row", "_catalog_video_row"),
+            ("_cleanup_payload", "_cleanup_payload"),
+            ("_clip_grab_payload", "_clip_grab_payload"),
+            ("_clip_hit_row", "_clip_hit_row"),
+            ("_doctor_payload", "_doctor_payload"),
+            ("_download_operation_item_payload", "_download_operation_item_payload"),
+            ("_download_operation_payload", "_download_operation_payload"),
+            ("_history_row", "_history_row"),
+            ("_index_payload", "_index_payload"),
+            ("_index_summary_payload", "_index_summary_payload"),
+            ("_json_error_payload", "_json_error_payload"),
+            ("_library_detail_payload", "_library_detail_payload"),
+            ("_library_remove_payload", "_library_remove_payload"),
+            ("_mutation_payload", "_mutation_payload"),
+            ("_normalize_optional_output_mode", "_normalize_optional_output_mode"),
+            ("_normalize_output_mode", "_normalize_output_mode"),
+            ("_pick_payload", "_pick_payload"),
+            ("_platform_status", "_platform_status"),
+            ("_print_json", "_print_json"),
+            ("_print_json_error", "_print_json_error"),
+            ("_print_plain_mapping", "_print_plain_mapping"),
+            ("_print_plain_rows", "_print_plain_rows"),
+            ("_render_cleanup_payload", "_render_cleanup_payload"),
+            ("_render_clip_grab_payload", "_render_clip_grab_payload"),
+            ("_render_clip_hits", "_render_clip_hits"),
+            ("_render_doctor", "_render_doctor"),
+            ("_render_download_payload", "_render_download_payload"),
+            ("_render_history_rows", "_render_history_rows"),
+            ("_render_index_payload", "_render_index_payload"),
+            ("_render_index_summary", "_render_index_summary"),
+            ("_render_info_payload", "_render_info_payload"),
+            ("_render_library_detail", "_render_library_detail"),
+            ("_render_library_remove_payload", "_render_library_remove_payload"),
+            ("_render_library_rows", "_render_library_rows"),
+            ("_render_pick_payload", "_render_pick_payload"),
+            ("_render_playlist_summary", "_render_playlist_summary"),
+            ("_render_results", "_render_results"),
+            ("_tool_install_hint", "_tool_install_hint"),
+            ("_video_info_payload", "_video_info_payload"),
+            ("_video_row", "_video_row"),
+        ),
+    ),
+    (
+        "yt_agent.indexer",
+        (
+            ("IndexSummary", "IndexSummary"),
+            ("index_manifest_record", "index_manifest_record"),
+            ("index_refresh", "index_refresh"),
+            ("index_target", "index_target"),
+        ),
+    ),
+    (
+        "yt_agent.clips",
+        (
+            ("extract_clip", "extract_clip"),
+            ("extract_clip_for_range", "extract_clip_for_range"),
+            ("plan_clip", "plan_clip"),
+            ("plan_clip_for_range", "plan_clip_for_range"),
+        ),
+    ),
+    ("yt_agent.catalog", (("CatalogStore", "CatalogStore"),)),
+    ("yt_agent.tui", (("launch_tui", "launch_tui"),)),
+):
+    for _local_name, _remote_name in _bindings:
+        globals()[_local_name] = _lazy_callable(_module_name, _remote_name)
+
+del _bindings
+del _local_name
+del _module_name
+del _remote_name
 
 
 def _operation_lock_path(settings: Settings) -> Path:
     return settings.catalog_file.parent / "operation.lock"
-
-
-def _video_info_payload(info: VideoInfo) -> dict[str, Any]:
-    return {
-        "video_id": info.video_id,
-        "title": info.title,
-        "channel": info.channel,
-        "upload_date": info.upload_date or "undated",
-        "duration": info.display_duration,
-        "duration_seconds": info.duration_seconds,
-        "webpage_url": info.webpage_url,
-        "extractor_key": info.extractor_key,
-    }
-
-
-def _index_summary_payload(summary: IndexSummary) -> dict[str, int]:
-    return {
-        "videos": summary.videos,
-        "playlists": summary.playlists,
-        "chapters": summary.chapters,
-        "transcript_segments": summary.transcript_segments,
-    }
-
-
-def _download_operation_item_payload(item: DownloadOperationItem) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "status": item.status,
-        "requested_input": item.requested_input,
-        **_video_info_payload(item.info),
-    }
-    if item.reason:
-        payload["reason"] = item.reason
-    if item.output_path is not None:
-        payload["output_path"] = str(item.output_path)
-    if item.info_json_path is not None:
-        payload["info_json_path"] = str(item.info_json_path)
-    payload["indexed"] = item.indexed
-    if item.index_summary is not None:
-        payload["index_summary"] = _index_summary_payload(item.index_summary)
-    if item.index_warning:
-        payload["index_warning"] = item.index_warning
-    if item.error_message:
-        payload["error_message"] = item.error_message
-    if item.stderr:
-        payload["stderr"] = item.stderr
-    return payload
 
 
 def _version_callback(value: bool) -> None:
@@ -162,8 +313,23 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit(code=int(ExitCode.OK))
 
 
+def _configure_logging(*, verbose: bool) -> None:
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.WARNING,
+        format="%(levelname)s %(name)s %(message)s",
+        stream=sys.stderr,
+        force=True,
+    )
+
+
 @app.callback()
 def _app_callback(
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Enable debug logging on stderr.",
+    ),
     version: bool = typer.Option(
         False,
         "--version",
@@ -172,44 +338,8 @@ def _app_callback(
         help="Show the yt-agent version and exit.",
     ),
 ) -> None:
+    _configure_logging(verbose=verbose)
     _ = version
-
-
-def _normalize_output_mode(value: str) -> str:
-    mode = value.casefold().strip()
-    if mode not in OUTPUT_MODES:
-        allowed = ", ".join(sorted(OUTPUT_MODES))
-        raise InvalidInputError(f"Output mode must be one of: {allowed}")
-    return mode
-
-
-def _print_json(payload: object) -> None:
-    console.file.write(json.dumps(payload, indent=2))
-    console.file.write("\n")
-    console.file.flush()
-
-
-def _print_json_error(payload: object) -> None:
-    error_console.file.write(json.dumps(payload, indent=2))
-    error_console.file.write("\n")
-    error_console.file.flush()
-
-
-def _print_plain_mapping(rows: list[tuple[str, object]]) -> None:
-    for key, value in rows:
-        console.print(
-            f"{sanitize_terminal_text(key)}\t{sanitize_terminal_text(value)}",
-            markup=False,
-        )
-
-
-def _print_plain_rows(columns: list[tuple[str, str]], rows: list[dict[str, Any]]) -> None:
-    console.print("\t".join(sanitize_terminal_text(label) for _, label in columns), markup=False)
-    for row in rows:
-        console.print(
-            "\t".join(sanitize_terminal_text(row.get(key, "")) for key, _ in columns),
-            markup=False,
-        )
 
 
 def _load_settings(config_path: Path | None = None) -> Settings:
@@ -222,7 +352,7 @@ def _prepare_storage(settings: Settings) -> None:
     ensure_manifest_file(settings.manifest_file)
 
 
-def _catalog(settings: Settings, *, readonly: bool = False) -> CatalogStore:
+def _catalog(settings: Settings, *, readonly: bool = False) -> Any:
     store = CatalogStore(settings.catalog_file, readonly=readonly)
     if not readonly:
         store.ensure_schema()
@@ -251,11 +381,28 @@ def _raise_cli_error(exc: YtAgentError, *, output_mode: str | None = None) -> No
 
 
 def _run_guarded(callback: Callable[[], None], *, output_mode: str | None = None) -> None:
+    callback_name = getattr(callback, "__name__", callback.__class__.__name__)
+    start_time = time.perf_counter()
+    logger.debug("Starting command callback=%s output_mode=%s", callback_name, output_mode)
     try:
         callback()
     except YtAgentError as exc:
         _raise_cli_error(exc, output_mode=output_mode)
-    except sqlite3.Error as exc:
+    except KeyboardInterrupt as exc:
+        normalized_output = _normalize_optional_output_mode(output_mode)
+        if normalized_output == "json":
+            payload = _json_error_payload(
+                exit_code=int(ExitCode.INTERRUPTED),
+                error_type="KeyboardInterrupt",
+                message="Interrupted.",
+            )
+            _print_json_error(payload)
+        else:
+            error_console.print("[red]Interrupted.[/red]")
+        raise typer.Exit(code=int(ExitCode.INTERRUPTED)) from exc
+    except Exception as exc:
+        if exc.__class__.__module__ != "sqlite3":
+            raise
         normalized_output = _normalize_optional_output_mode(output_mode)
         if normalized_output == "json":
             payload = _json_error_payload(
@@ -271,396 +418,39 @@ def _run_guarded(callback: Callable[[], None], *, output_mode: str | None = None
                 markup=False,
             )
         raise typer.Exit(code=int(ExitCode.STORAGE)) from exc
-    except KeyboardInterrupt as exc:
-        normalized_output = _normalize_optional_output_mode(output_mode)
-        if normalized_output == "json":
-            payload = _json_error_payload(
-                exit_code=int(ExitCode.INTERRUPTED),
-                error_type="KeyboardInterrupt",
-                message="Interrupted.",
-            )
-            _print_json_error(payload)
-        else:
-            error_console.print("[red]Interrupted.[/red]")
-        raise typer.Exit(code=int(ExitCode.INTERRUPTED)) from exc
+    finally:
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        logger.debug("Finished command callback=%s elapsed_ms=%.2f", callback_name, elapsed_ms)
+
+
+class CompletionShell(StrEnum):
+    bash = "bash"
+    zsh = "zsh"
+    fish = "fish"
+
+
+def _completion_prog_name() -> str:
+    return "yt-agent"
+
+
+def _completion_env_var(prog_name: str) -> str:
+    return f"_{prog_name.replace('-', '_').upper()}_COMPLETE"
+
+
+def _resolve_completion_shell(shell: CompletionShell | None) -> str:
+    if shell is not None:
+        return shell.value
+    shell_path = os.getenv("SHELL", "").strip()
+    detected_shell = Path(shell_path).name.casefold()
+    if detected_shell in {item.value for item in CompletionShell}:
+        return detected_shell
+    raise InvalidInputError(
+        "Unable to detect shell from $SHELL. Use --shell bash, zsh, or fish."
+    )
 
 
 def _read_targets_from_file(path: Path) -> list[str]:
-    """Read URLs/IDs from a file, one per line. Blank lines and # comments are skipped."""
-    if not path.exists():
-        raise InvalidInputError(f"--from-file path not found: {path}")
-    lines = path.read_text(encoding="utf-8").splitlines()
-    return [line.strip() for line in lines if line.strip() and not line.strip().startswith("#")]
-
-
-def _platform_status() -> str:
-    if sys.platform in {"darwin", "linux"}:
-        return "supported"
-    return "experimental"
-
-
-def _tool_install_hint(tool_name: str) -> str:
-    if sys.platform == "darwin":
-        hints = {
-            "yt-dlp": "brew install yt-dlp",
-            "ffmpeg": "brew install ffmpeg",
-            "fzf": "brew install fzf",
-            "mpv": "brew install mpv",
-        }
-        return hints.get(tool_name, "")
-    if sys.platform.startswith("linux"):
-        hints = {
-            "yt-dlp": "python3 -m pip install -U yt-dlp",
-            "ffmpeg": "sudo apt-get install -y ffmpeg",
-            "fzf": "sudo apt-get install -y fzf",
-            "mpv": "sudo apt-get install -y mpv",
-        }
-        return hints.get(tool_name, "")
-    return ""
-
-
-def _doctor_payload(settings: Settings) -> dict[str, Any]:
-    tools: list[dict[str, Any]] = []
-    for tool_name, required in (
-        ("yt-dlp", True),
-        ("ffmpeg", False),
-        ("fzf", False),
-        ("mpv", False),
-    ):
-        path = shutil.which(tool_name)
-        tools.append(
-            {
-                "name": tool_name,
-                "required": required,
-                "installed": path is not None,
-                "status": "ok" if path else ("missing" if required else "optional"),
-                "path": path or "",
-                "install_hint": _tool_install_hint(tool_name),
-            }
-        )
-    yt_dlp_installed = any(tool["name"] == "yt-dlp" and tool["installed"] for tool in tools)
-    ffmpeg_installed = any(tool["name"] == "ffmpeg" and tool["installed"] for tool in tools)
-    if yt_dlp_installed and ffmpeg_installed:
-        next_step = 'Ready: run yt-agent download URL or yt-agent grab "query".'
-    elif yt_dlp_installed:
-        next_step = 'Ready for search/download: run yt-agent download URL or yt-agent search "query".'
-    else:
-        next_step = "Install yt-dlp first, then rerun yt-agent doctor."
-    return {
-        "tools": tools,
-        "paths": {
-            "config": str(settings.config_path),
-            "download_root": str(settings.download_root),
-            "archive_file": str(settings.archive_file),
-            "manifest_file": str(settings.manifest_file),
-            "catalog_file": str(settings.catalog_file),
-            "clips_root": str(settings.clips_root),
-        },
-        "support": {
-            "platform": sys.platform,
-            "status": _platform_status(),
-            "supported_platforms": ["darwin", "linux"],
-            "windows": "experimental",
-            "tui": "read-mostly catalog browser",
-            "notes": "Search, download, and clip behavior depend on external tools such as yt-dlp and ffmpeg.",
-            "next_step": next_step,
-        },
-    }
-
-
-def _video_row(info: VideoInfo, *, index: int | None = None) -> dict[str, Any]:
-    row: dict[str, Any] = {
-        "video_id": info.video_id,
-        "title": info.title,
-        "channel": info.channel,
-        "duration": info.display_duration,
-        "duration_seconds": info.duration_seconds,
-        "upload_date": info.upload_date or "undated",
-        "webpage_url": info.webpage_url,
-        "extractor_key": info.extractor_key,
-    }
-    if index is not None:
-        row["index"] = index
-    return row
-
-
-def _catalog_video_row(video: CatalogVideo) -> dict[str, Any]:
-    return {
-        "video_id": video.video_id,
-        "title": video.title,
-        "channel": video.channel,
-        "upload_date": video.upload_date or "undated",
-        "duration": video.display_duration,
-        "duration_seconds": video.duration_seconds,
-        "webpage_url": video.webpage_url,
-        "output_path": str(video.output_path) if video.output_path else "",
-        "has_local_media": video.has_local_media,
-        "transcript_segments": video.transcript_segment_count,
-        "chapters": video.chapter_count,
-        "playlists": video.playlist_count,
-    }
-
-
-def _clip_hit_row(hit: ClipSearchHit) -> dict[str, Any]:
-    base_url = getattr(hit, "webpage_url", "")
-    start_seconds = float(getattr(hit, "start_seconds", 0.0) or 0.0)
-    end_seconds = float(getattr(hit, "end_seconds", start_seconds) or start_seconds)
-    timestamp_url = f"{base_url}&t={int(start_seconds)}" if base_url else ""
-    return {
-        "result_id": hit.result_id,
-        "source": hit.source,
-        "range": getattr(hit, "display_range", f"{start_seconds:.0f} - {end_seconds:.0f}"),
-        "start_seconds": start_seconds,
-        "end_seconds": end_seconds,
-        "title": hit.title,
-        "channel": hit.channel,
-        "match": hit.match_text,
-        "context": getattr(hit, "context", ""),
-        "video_id": getattr(hit, "video_id", ""),
-        "webpage_url": base_url,
-        "timestamp_url": timestamp_url,
-        "output_path": str(getattr(hit, "output_path", "") or ""),
-    }
-
-
-def _render_results(results: list[VideoInfo], *, title: str = "Results", output_mode: str = "table") -> None:
-    mode = _normalize_output_mode(output_mode)
-    rows = [_video_row(result, index=index) for index, result in enumerate(results, start=1)]
-    if mode == "json":
-        _print_json(rows)
-        return
-    if mode == "plain":
-        _print_plain_rows(
-            [
-                ("index", "index"),
-                ("title", "title"),
-                ("channel", "channel"),
-                ("duration", "duration"),
-                ("upload_date", "upload_date"),
-                ("video_id", "video_id"),
-                ("webpage_url", "webpage_url"),
-            ],
-            rows,
-        )
-        return
-
-    table = Table(title=title)
-    table.add_column("#", justify="right")
-    table.add_column("Title")
-    table.add_column("Channel")
-    table.add_column("Duration", justify="right")
-    table.add_column("Upload Date")
-    table.add_column("ID")
-    table.add_column("URL", overflow="fold")
-    for row in rows:
-        table.add_row(
-            sanitize_terminal_text(row["index"]),
-            sanitize_terminal_text(row["title"]),
-            sanitize_terminal_text(row["channel"]),
-            sanitize_terminal_text(row["duration"]),
-            sanitize_terminal_text(row["upload_date"]),
-            sanitize_terminal_text(row["video_id"]),
-            sanitize_terminal_text(row["webpage_url"]),
-        )
-    console.print(table)
-
-
-def _build_info_payload(
-    payload: dict[str, Any],
-    *,
-    target: str,
-    include_entries: bool = False,
-) -> dict[str, Any]:
-    entries = payload.get("entries")
-    if isinstance(entries, list):
-        result: dict[str, Any] = {
-            "type": "playlist",
-            "title": str(payload.get("title") or "Untitled"),
-            "channel": str(payload.get("channel") or payload.get("uploader") or "Unknown"),
-            "entries_count": len([entry for entry in entries if entry]),
-            "webpage_url": str(payload.get("webpage_url") or payload.get("original_url") or target),
-        }
-        if include_entries:
-            resolution = yt_dlp.resolve_payload(target, payload)
-            result["entries"] = [_video_row(item.info) for item in resolution.targets]
-            result["skipped_messages"] = resolution.skipped_messages
-        return result
-
-    info = VideoInfo.from_yt_dlp(payload, original_url=target)
-    return {"type": "video", **_video_row(info)}
-
-
-def _render_info_payload(payload: dict[str, Any], *, output_mode: str = "table") -> None:
-    mode = _normalize_output_mode(output_mode)
-    if mode == "json":
-        _print_json(payload)
-        return
-    if mode == "plain":
-        rows = [
-            ("type", payload.get("type", "")),
-            ("title", payload.get("title", "")),
-            ("channel", payload.get("channel", "")),
-        ]
-        if payload.get("type") == "video":
-            rows.insert(1, ("video_id", payload.get("video_id", "")))
-            rows.append(("duration", payload.get("duration", "")))
-            rows.append(("upload_date", payload.get("upload_date", "")))
-        else:
-            rows.append(("entries_count", payload.get("entries_count", "")))
-        rows.append(("webpage_url", payload.get("webpage_url", "")))
-        _print_plain_mapping(rows)
-        entries = payload.get("entries")
-        if isinstance(entries, list) and entries:
-            console.print("", markup=False)
-            _print_plain_rows(
-                [
-                    ("video_id", "video_id"),
-                    ("title", "title"),
-                    ("channel", "channel"),
-                    ("duration", "duration"),
-                    ("upload_date", "upload_date"),
-                    ("webpage_url", "webpage_url"),
-                ],
-                [entry for entry in entries if isinstance(entry, dict)],
-            )
-        return
-
-    table = Table(title="Metadata")
-    table.add_column("Field")
-    table.add_column("Value")
-    if payload.get("type") == "playlist":
-        table.add_row("type", "playlist")
-        table.add_row("title", sanitize_terminal_text(payload.get("title") or "Untitled"))
-        table.add_row("channel", sanitize_terminal_text(payload.get("channel") or "Unknown"))
-        table.add_row("entries", sanitize_terminal_text(payload.get("entries_count") or 0))
-        table.add_row("webpage_url", sanitize_terminal_text(payload.get("webpage_url") or ""))
-    else:
-        table.add_row("video_id", sanitize_terminal_text(payload.get("video_id") or ""))
-        table.add_row("title", sanitize_terminal_text(payload.get("title") or "Untitled"))
-        table.add_row("channel", sanitize_terminal_text(payload.get("channel") or "Unknown"))
-        table.add_row("duration", sanitize_terminal_text(payload.get("duration") or "--:--"))
-        table.add_row("upload_date", sanitize_terminal_text(payload.get("upload_date") or "undated"))
-        table.add_row("webpage_url", sanitize_terminal_text(payload.get("webpage_url") or ""))
-    console.print(table)
-
-    entries = payload.get("entries")
-    if isinstance(entries, list) and entries:
-        _print_plain_mapping([(f"skipped_message_{index}", message) for index, message in enumerate(payload.get("skipped_messages", []), start=1)])
-        table = Table(title="Playlist Entries")
-        table.add_column("#", justify="right")
-        table.add_column("Title")
-        table.add_column("Channel")
-        table.add_column("Duration", justify="right")
-        table.add_column("Upload Date")
-        table.add_column("ID")
-        table.add_column("URL", overflow="fold")
-        for index, entry in enumerate(entries, start=1):
-            if not isinstance(entry, dict):
-                continue
-            table.add_row(
-                sanitize_terminal_text(index),
-                sanitize_terminal_text(entry["title"]),
-                sanitize_terminal_text(entry["channel"]),
-                sanitize_terminal_text(entry["duration"]),
-                sanitize_terminal_text(entry["upload_date"]),
-                sanitize_terminal_text(entry["video_id"]),
-                sanitize_terminal_text(entry["webpage_url"]),
-            )
-        console.print(table)
-
-
-def _render_playlist_summary(
-    payload: dict[str, Any],
-    entry_count: int,
-    *,
-    output_mode: str = "table",
-) -> None:
-    mode = _normalize_output_mode(output_mode)
-    if mode == "plain":
-        _print_plain_mapping(
-            [
-                ("title", payload.get("title") or "Untitled"),
-                ("channel", payload.get("channel") or payload.get("uploader") or "Unknown"),
-                ("entries", entry_count),
-                ("url", payload.get("webpage_url") or payload.get("original_url") or ""),
-            ]
-        )
-        return
-    table = Table(title="Playlist")
-    table.add_column("Field")
-    table.add_column("Value")
-    table.add_row("title", sanitize_terminal_text(payload.get("title") or "Untitled"))
-    table.add_row("channel", sanitize_terminal_text(payload.get("channel") or payload.get("uploader") or "Unknown"))
-    table.add_row("entries", sanitize_terminal_text(entry_count))
-    table.add_row("url", sanitize_terminal_text(payload.get("webpage_url") or payload.get("original_url") or ""))
-    console.print(table)
-
-
-def _render_doctor(settings: Settings, *, output_mode: str = "table") -> bool:
-    payload = _doctor_payload(settings)
-    missing_required = any(tool["required"] and not tool["installed"] for tool in payload["tools"])
-    mode = _normalize_output_mode(output_mode)
-    if mode == "json":
-        _print_json(payload)
-        return missing_required
-    if mode == "plain":
-        rows: list[dict[str, Any]] = []
-        for tool in payload["tools"]:
-            rows.append(
-                {
-                    "component": tool["name"],
-                    "status": tool["status"],
-                    "value": tool["path"],
-                    "install_hint": tool["install_hint"],
-                }
-            )
-        for key, value in payload["paths"].items():
-            rows.append({"component": key, "status": "path", "value": value, "install_hint": ""})
-        _print_plain_rows(
-            [
-                ("component", "component"),
-                ("status", "status"),
-                ("value", "value"),
-                ("install_hint", "install_hint"),
-            ],
-            rows,
-        )
-        console.print("", markup=False)
-        _print_plain_mapping(
-            [
-                ("platform", payload["support"]["platform"]),
-                ("platform_status", payload["support"]["status"]),
-                ("supported_platforms", ",".join(payload["support"]["supported_platforms"])),
-                ("windows", payload["support"]["windows"]),
-                ("tui", payload["support"]["tui"]),
-                ("notes", payload["support"]["notes"]),
-                ("next_step", payload["support"]["next_step"]),
-            ]
-        )
-        return missing_required
-
-    table = Table(title="Doctor")
-    table.add_column("Tool / Path")
-    table.add_column("Status")
-    table.add_column("Value")
-    table.add_column("Install Hint")
-    for tool in payload["tools"]:
-        table.add_row(
-            sanitize_terminal_text(tool["name"]),
-            sanitize_terminal_text(tool["status"]),
-            sanitize_terminal_text(tool["path"] or "-"),
-            sanitize_terminal_text(tool["install_hint"] or "-"),
-        )
-    for key, value in payload["paths"].items():
-        table.add_row(sanitize_terminal_text(key), "path", sanitize_terminal_text(value), "-")
-    console.print(table)
-    console.print(
-        f"Platform: {sanitize_terminal_text(payload['support']['platform'])} ({sanitize_terminal_text(payload['support']['status'])}). Supported today: macOS and Linux; Windows is experimental.",
-        markup=False,
-    )
-    console.print(sanitize_terminal_text(payload["support"]["notes"]), markup=False)
-    console.print(sanitize_terminal_text(payload["support"]["next_step"]), markup=False)
-    return missing_required
+    return cast(list[str], _read_targets_from_file_impl(path))
 
 
 def _download_targets(
@@ -673,228 +463,27 @@ def _download_targets(
     quiet: bool = False,
     show_failure_details: bool = True,
 ) -> list[DownloadOperationItem]:
-    archive_entries = load_archive_entries(settings.archive_file)
-    items: list[DownloadOperationItem] = []
-    for target in targets:
-        if is_archived(archive_entries, target.info):
-            item = DownloadOperationItem(
-                status="skipped",
-                info=target.info,
-                requested_input=target.original_input,
-                reason="already archived",
-            )
-            items.append(item)
-            if not quiet:
-                console.print(
-                    f"Skipping archived: {sanitize_terminal_text(target.info.title)} [{sanitize_terminal_text(target.info.video_id)}]",
-                    style="yellow",
-                    markup=False,
-                )
-            continue
-        if not quiet:
-            console.print(f"Downloading: {sanitize_terminal_text(target.info.title)}", style="cyan", markup=False)
-        try:
-            execution = yt_dlp.download_target(
-                target, settings, mode=mode, fetch_subs=fetch_subs, auto_subs=auto_subs
-            )
-        except ExternalCommandError as exc:
-            item = DownloadOperationItem(
-                status="failed",
-                info=target.info,
-                requested_input=target.original_input,
-                error_message=str(exc),
-                stderr=exc.stderr,
-            )
-            items.append(item)
-            if show_failure_details:
-                detail = f" {sanitize_terminal_text(exc.stderr)}" if exc.stderr else ""
-                error_console.print(
-                    f"Failed: {sanitize_terminal_text(target.info.title)} [{sanitize_terminal_text(target.info.video_id)}] {sanitize_terminal_text(exc)}{detail}",
-                    style="red",
-                    markup=False,
-                )
-            continue
-        if execution is None:
-            item = DownloadOperationItem(
-                status="skipped",
-                info=target.info,
-                requested_input=target.original_input,
-                reason="already archived (reported by yt-dlp)",
-            )
-            items.append(item)
-            if not quiet:
-                console.print(
-                    f"Skipping archived (detected by yt-dlp): {sanitize_terminal_text(target.info.title)} [{sanitize_terminal_text(target.info.video_id)}]",
-                    style="yellow",
-                    markup=False,
-                )
-            continue
-        record = ManifestRecord.from_download(
-            target,
-            output_path=execution.output_path,
-            info_json_path=execution.info_json_path,
-        )
-        append_manifest_record(settings.manifest_file, record)
-        archive_entries.add(target.info.archive_key)
-        item = DownloadOperationItem(
-            status="downloaded",
-            info=target.info,
-            requested_input=target.original_input,
-            output_path=execution.output_path,
-            info_json_path=execution.info_json_path,
-        )
-        if not quiet:
-            console.print(f"Saved: {sanitize_terminal_text(execution.output_path)}", style="green", markup=False)
-        try:
-            summary = index_manifest_record(settings, record, fetch_subs=fetch_subs, auto_subs=auto_subs)
-            item = DownloadOperationItem(
-                **{**item.__dict__, "indexed": True, "index_summary": summary}
-            )
-        except Exception as exc:  # pragma: no cover - indexing is a best-effort follow-up
-            item = DownloadOperationItem(
-                **{**item.__dict__, "index_warning": sanitize_terminal_text(exc)}
-            )
-            if not quiet:
-                error_console.print(
-                    f"Warning: post-download indexing failed: {sanitize_terminal_text(exc)}",
-                    style="yellow",
-                    markup=False,
-                )
-        items.append(item)
-    return items
-
-
-def _download_operation_payload(
-    *,
-    command: str,
-    requested: list[str],
-    resolved_targets: list[DownloadTarget],
-    items: list[DownloadOperationItem],
-    mode: str,
-    fetch_subs: bool,
-    auto_subs: bool,
-    download_root: Path,
-    dry_run: bool = False,
-    skipped_messages: list[str] | None = None,
-) -> dict[str, Any]:
-    downloaded = [_download_operation_item_payload(item) for item in items if item.status == "downloaded"]
-    skipped = [_download_operation_item_payload(item) for item in items if item.status == "skipped"]
-    failed = [_download_operation_item_payload(item) for item in items if item.status == "failed"]
-    warnings: list[Any] = list(skipped_messages or [])
-    warnings.extend(
-        {"video_id": item.info.video_id, "warning": item.index_warning}
-        for item in items
-        if item.index_warning
+    return cast(
+        list[DownloadOperationItem],
+        _download_targets_impl(
+            targets,
+            settings,
+            mode=mode,
+            fetch_subs=fetch_subs,
+            auto_subs=auto_subs,
+            quiet=quiet,
+            show_failure_details=show_failure_details,
+            append_manifest_record_fn=append_manifest_record,
+            index_manifest_record_fn=index_manifest_record,
+        ),
     )
-    errors = [
-        {
-            "video_id": item.info.video_id,
-            "title": item.info.title,
-            "message": item.error_message or "download failed",
-            "stderr": item.stderr or "",
-        }
-        for item in items
-        if item.status == "failed"
-    ]
-    if dry_run or not resolved_targets:
-        status = "noop"
-    elif failed:
-        status = "partial" if downloaded or skipped else "error"
-    elif downloaded:
-        status = "ok"
-    else:
-        status = "noop"
-    return _mutation_payload(
-        command=command,
-        status=status,
-        summary={
-            "requested": len(requested),
-            "resolved": len(resolved_targets),
-            "downloaded": len(downloaded),
-            "skipped": len(skipped),
-            "failed": len(failed),
-            "dry_run": dry_run,
-        },
-        warnings=warnings,
-        errors=errors,
-        requested=requested,
-        resolved_targets=[_video_info_payload(target.info) for target in resolved_targets],
-        downloaded=downloaded,
-        skipped=skipped,
-        failed=failed,
-        mode=mode,
-        fetch_subs=fetch_subs,
-        auto_subs=auto_subs,
-        download_root=str(download_root),
-        dry_run=dry_run,
-    )
-
-
-def _render_download_payload(payload: dict[str, Any], *, output_mode: str, quiet: bool = False) -> None:
-    mode = _normalize_output_mode(output_mode)
-    if mode == "json":
-        _print_json(payload)
-        return
-
-    summary = payload["summary"]
-    if not payload.get("resolved_targets") and not payload.get("dry_run"):
-        if not quiet:
-            for warning in payload.get("warnings", []):
-                console.print(sanitize_terminal_text(warning), style="yellow", markup=False)
-            console.print("Nothing to download.", markup=False)
-        return
-    if payload.get("dry_run"):
-        resolved_targets = payload.get("resolved_targets", [])
-        if resolved_targets:
-            _render_results(
-                [
-                    VideoInfo(
-                        video_id=str(item["video_id"]),
-                        title=str(item["title"]),
-                        channel=str(item["channel"]),
-                        upload_date=None if str(item["upload_date"]) == "undated" else str(item["upload_date"]),
-                        duration_seconds=item.get("duration_seconds") if isinstance(item.get("duration_seconds"), int | type(None)) else None,
-                        extractor_key=str(item["extractor_key"]),
-                        webpage_url=str(item["webpage_url"]),
-                    )
-                    for item in resolved_targets
-                    if isinstance(item, dict)
-                ],
-                title="Download Preview",
-                output_mode="table" if mode == "table" else "plain",
-            )
-        console.print(
-            f"Dry run: would process {summary['resolved']} target(s) in {sanitize_terminal_text(payload['mode'])} mode.",
-            style="cyan",
-            markup=False,
-        )
-        return
-
-    if quiet:
-        return
-
-    for warning in payload.get("warnings", []):
-        if isinstance(warning, dict):
-            console.print(
-                f"Warning: {sanitize_terminal_text(warning.get('video_id', ''))} {sanitize_terminal_text(warning.get('warning', ''))}",
-                style="yellow",
-                markup=False,
-            )
-    console.print(
-        f"Completed: {summary['downloaded']} downloaded, {summary['skipped']} skipped, {summary['failed']} failed.",
-        markup=False,
-    )
-    downloaded_rows = payload.get("downloaded", [])
-    if downloaded_rows:
-        last_output = downloaded_rows[-1].get("output_path")
-        if last_output:
-            console.print(f"Latest save: {sanitize_terminal_text(last_output)}", style="green", markup=False)
-        console.print("Next: run yt-agent library stats or yt-agent clips search \"query\".", markup=False)
 
 
 def _select_by_indexes(results: list[VideoInfo], selection: str) -> list[VideoInfo]:
-    indexes = parse_selection(selection, len(results))
-    return [results[index - 1] for index in indexes]
+    return cast(
+        list[VideoInfo],
+        _select_by_indexes_impl(results, selection, parse_selection_fn=parse_selection),
+    )
 
 
 def _choose_results(
@@ -904,21 +493,25 @@ def _choose_results(
     prefer_fzf: bool = False,
     configured_selector: str = "prompt",
 ) -> list[VideoInfo]:
-    if selection is not None:
-        return _select_by_indexes(results, selection)
-    return select_results(results, prefer_fzf=prefer_fzf, configured_selector=configured_selector)
+    return cast(
+        list[VideoInfo],
+        _choose_results_impl(
+            results,
+            selection=selection,
+            prefer_fzf=prefer_fzf,
+            configured_selector=configured_selector,
+            select_by_indexes_fn=_select_by_indexes,
+            select_results_fn=select_results,
+        ),
+    )
 
 
 def _validate_subtitle_flags(fetch_subs: bool, auto_subs: bool) -> None:
-    if auto_subs and not fetch_subs:
-        raise InvalidInputError("--auto-subs requires --fetch-subs.")
+    _validate_subtitle_flags_impl(fetch_subs, auto_subs)
 
 
 def _validate_clip_mode(mode: str) -> str:
-    normalized = mode.casefold().strip()
-    if normalized not in {"fast", "accurate"}:
-        raise InvalidInputError("--mode must be 'fast' or 'accurate'.")
-    return normalized
+    return cast(str, _validate_clip_mode_impl(mode))
 
 
 def _require_noninteractive_json_selection(
@@ -927,56 +520,11 @@ def _require_noninteractive_json_selection(
     selection: str | None,
     action: str,
 ) -> None:
-    if _normalize_output_mode(output_mode) == "json" and selection is None:
-        raise InvalidInputError(f"{action} with --output json requires --select.")
-
-
-def _pick_payload(query: str, results: list[VideoInfo], selected: list[VideoInfo]) -> dict[str, Any]:
-    return _mutation_payload(
-        command="pick",
-        status="noop" if not selected else "ok",
-        summary={"results": len(results), "selected": len(selected)},
-        query=query,
-        results=[_video_row(result, index=index) for index, result in enumerate(results, start=1)],
-        selected=[_video_info_payload(item) for item in selected],
-        selected_urls=[item.webpage_url for item in selected],
+    _require_noninteractive_json_selection_impl(
+        output_mode=output_mode,
+        selection=selection,
+        action=action,
     )
-
-
-def _render_pick_payload(payload: dict[str, Any], *, output_mode: str) -> None:
-    mode = _normalize_output_mode(output_mode)
-    if mode == "json":
-        _print_json(payload)
-        return
-    results = payload.get("results", [])
-    if results:
-        rows: list[VideoInfo] = []
-        for entry in results:
-            if not isinstance(entry, dict):
-                continue
-            rows.append(
-                VideoInfo(
-                    video_id=str(entry["video_id"]),
-                    title=str(entry["title"]),
-                    channel=str(entry["channel"]),
-                    upload_date=None if str(entry["upload_date"]) == "undated" else str(entry["upload_date"]),
-                    duration_seconds=entry.get("duration_seconds") if isinstance(entry.get("duration_seconds"), int | type(None)) else None,
-                    extractor_key=str(entry.get("extractor_key") or "youtube"),
-                    webpage_url=str(entry["webpage_url"]),
-                )
-            )
-        _render_results(rows, title="Search Results", output_mode="table" if mode == "table" else "plain")
-    selected_urls = payload.get("selected_urls", [])
-    if not selected_urls:
-        console.print("No selection made.")
-        return
-    if mode == "plain":
-        for url in selected_urls:
-            console.print(sanitize_terminal_text(url), markup=False)
-        return
-    console.print("Selected URLs:", markup=False)
-    for url in selected_urls:
-        console.print(sanitize_terminal_text(url), markup=False)
 
 
 def _resolve_download_inputs(
@@ -991,426 +539,149 @@ def _resolve_download_inputs(
     selection_output_mode: str = "table",
     quiet: bool = False,
 ) -> tuple[list[DownloadTarget], list[str]]:
-    all_targets: list[DownloadTarget] = []
-    skipped_messages: list[str] = []
-    for user_input in inputs:
-        payload = yt_dlp.fetch_info(user_input)
-        resolution = yt_dlp.resolve_payload(user_input, payload, source_query=source_query)
-        skipped_messages.extend(resolution.skipped_messages)
-
-        if not isinstance(payload.get("entries"), list) or not select_playlist:
-            all_targets.extend(resolution.targets)
-            continue
-
-        if not resolution.targets:
-            if render_selection and not quiet:
-                console.print(
-                    f"No downloadable entries found in playlist: {sanitize_terminal_text(user_input)}",
-                    style="yellow",
-                    markup=False,
-                )
-            continue
-
-        if render_selection and not quiet:
-            selection_mode = "table" if _normalize_output_mode(selection_output_mode) == "table" else "plain"
-            _render_playlist_summary(payload, len(resolution.targets), output_mode=selection_mode)
-            _render_results(
-                [target.info for target in resolution.targets],
-                title="Playlist Entries",
-                output_mode=selection_mode,
-            )
-        selected_infos = _choose_results(
-            [target.info for target in resolution.targets],
+    return cast(
+        tuple[list[DownloadTarget], list[str]],
+        _resolve_download_inputs_impl(
+            inputs,
+            settings,
+            source_query=source_query,
+            select_playlist=select_playlist,
+            use_fzf=use_fzf,
             selection=selection,
-            prefer_fzf=use_fzf,
-            configured_selector=settings.selector,
-        )
-        if not selected_infos:
-            if render_selection and not quiet:
-                console.print(
-                    f"No playlist selection made: {sanitize_terminal_text(payload.get('title') or user_input)}",
-                    style="yellow",
-                    markup=False,
-                )
-            continue
-
-        selected_ids = {item.video_id for item in selected_infos}
-        all_targets.extend([target for target in resolution.targets if target.info.video_id in selected_ids])
-
-    return all_targets, skipped_messages
-
-
-def _render_clip_hits(hits: list[ClipSearchHit], *, output_mode: str = "table") -> None:
-    mode = _normalize_output_mode(output_mode)
-    rows = [_clip_hit_row(hit) for hit in hits]
-    if mode == "json":
-        _print_json(rows)
-        return
-    if mode == "plain":
-        _print_plain_rows(
-            [
-                ("result_id", "result_id"),
-                ("source", "source"),
-                ("range", "range"),
-                ("title", "title"),
-                ("channel", "channel"),
-                ("match", "match"),
-                ("timestamp_url", "timestamp_url"),
-            ],
-            rows,
-        )
-        return
-
-    table = Table(title="Clip Hits")
-    table.add_column("Result ID")
-    table.add_column("Source")
-    table.add_column("Range")
-    table.add_column("Title")
-    table.add_column("Channel")
-    table.add_column("Match", overflow="fold")
-    table.add_column("Timestamp URL", overflow="fold")
-    for row in rows:
-        table.add_row(
-            sanitize_terminal_text(row["result_id"]),
-            sanitize_terminal_text(row["source"]),
-            sanitize_terminal_text(row["range"]),
-            sanitize_terminal_text(row["title"]),
-            sanitize_terminal_text(row["channel"]),
-            sanitize_terminal_text(row["match"]),
-            sanitize_terminal_text(row["timestamp_url"]),
-        )
-    console.print(table)
+            render_selection=render_selection,
+            selection_output_mode=selection_output_mode,
+            quiet=quiet,
+            choose_results_fn=_choose_results,
+        ),
+    )
 
 
 def _presence_flag(enabled: bool, disabled: bool, *, label: str) -> bool | None:
-    if enabled and disabled:
-        raise InvalidInputError(f"Choose only one of --{label} or --no-{label}.")
-    if enabled:
-        return True
-    if disabled:
-        return False
-    return None
+    return cast(bool | None, _presence_flag_impl(enabled, disabled, label=label))
 
 
-def _render_library_rows(
-    videos: list[CatalogVideo],
+def _history_rows(
+    settings: Settings,
     *,
-    title: str = "Library",
-    output_mode: str = "table",
-) -> None:
-    mode = _normalize_output_mode(output_mode)
-    rows = [_catalog_video_row(video) for video in videos]
-    if mode == "json":
-        _print_json(rows)
-        return
-    if mode == "plain":
-        _print_plain_rows(
-            [
-                ("video_id", "video_id"),
-                ("title", "title"),
-                ("channel", "channel"),
-                ("upload_date", "upload_date"),
-                ("duration", "duration"),
-                ("transcript_segments", "transcript_segments"),
-                ("chapters", "chapters"),
-                ("has_local_media", "has_local_media"),
-            ],
-            rows,
-        )
-        return
-
-    table = Table(title=title)
-    table.add_column("ID")
-    table.add_column("Title")
-    table.add_column("Channel")
-    table.add_column("Date")
-    table.add_column("Duration")
-    table.add_column("Transcript", justify="right")
-    table.add_column("Chapters", justify="right")
-    table.add_column("Local")
-    for row in rows:
-        table.add_row(
-            sanitize_terminal_text(row["video_id"]),
-            sanitize_terminal_text(row["title"]),
-            sanitize_terminal_text(row["channel"]),
-            sanitize_terminal_text(row["upload_date"]),
-            sanitize_terminal_text(row["duration"]),
-            sanitize_terminal_text(row["transcript_segments"]),
-            sanitize_terminal_text(row["chapters"]),
-            "yes" if row["has_local_media"] else "no",
-        )
-    console.print(table)
+    limit: int,
+    channel: str | None = None,
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for record in reversed(iter_manifest_records(settings.manifest_file)):
+        if channel is not None and record.channel != channel:
+            continue
+        rows.append(_history_row(record))
+        if len(rows) >= limit:
+            break
+    return rows
 
 
-def _library_detail_payload(store: CatalogStore, video_id: str) -> dict[str, Any]:
-    payload = store.get_video_details(video_id)
-    if payload is None:
-        raise InvalidInputError(f"Video id '{video_id}' is not in the catalog.")
+def _catalog_video_ids(settings: Settings) -> set[str]:
+    store = _catalog(settings, readonly=True)
+    try:
+        with store.connect() as conn:
+            rows = conn.execute("SELECT video_id FROM videos").fetchall()
+    except FileNotFoundError:
+        return set()
+    return {sanitize_file_id(str(row["video_id"])) for row in rows}
+
+
+def _cleanup_candidates(settings: Settings) -> dict[str, list[Path]]:
+    catalog_ids = _catalog_video_ids(settings)
+    cache_dirs: list[Path] = []
+    empty_dirs: list[Path] = []
+    part_files: list[Path] = []
+
+    subtitle_cache_root = settings.catalog_file.parent / "subtitle-cache"
+    if subtitle_cache_root.exists():
+        cache_dirs = [
+            path
+            for path in sorted(subtitle_cache_root.iterdir())
+            if path.is_dir() and path.name not in catalog_ids
+        ]
+
+    if settings.download_root.exists():
+        empty_dirs = [
+            path
+            for path in sorted(settings.download_root.iterdir())
+            if path.is_dir()
+            and path != settings.clips_root
+            and not any(path.iterdir())
+        ]
+        part_files = [
+            path
+            for path in sorted(settings.download_root.rglob("*.part"))
+            if path.is_file()
+        ]
 
     return {
-        "video": _catalog_video_row(payload["video"]),
-        "chapters": [
-            {"position": chapter.position + 1, "title": chapter.title, "range": chapter.display_range}
-            for chapter in payload["chapters"]
-        ],
-        "subtitle_tracks": [
-            {
-                "language": track.lang,
-                "source": track.source,
-                "auto": track.is_auto,
-                "format": track.format,
-                "file": str(track.file_path),
-            }
-            for track in payload["subtitle_tracks"]
-        ],
-        "transcript_preview": [
-            {"range": segment.display_range, "text": segment.text}
-            for segment in payload["transcript_preview"]
-        ],
+        "removed_cache_dirs": cache_dirs,
+        "removed_empty_dirs": empty_dirs,
+        "removed_part_files": part_files,
     }
 
 
-def _render_library_detail(store: CatalogStore, video_id: str, *, output_mode: str = "table") -> None:
-    detail = _library_detail_payload(store, video_id)
-    mode = _normalize_output_mode(output_mode)
-    if mode == "json":
-        _print_json(detail)
-        return
-    if mode == "plain":
-        video = detail["video"]
-        _print_plain_mapping([(key, value) for key, value in video.items()])
-        chapters = detail["chapters"]
-        if chapters:
-            console.print("", markup=False)
-            _print_plain_rows([("position", "position"), ("title", "title"), ("range", "range")], chapters)
-        subtitle_tracks = detail["subtitle_tracks"]
-        if subtitle_tracks:
-            console.print("", markup=False)
-            _print_plain_rows([("language", "language"), ("source", "source"), ("auto", "auto"), ("file", "file")], subtitle_tracks)
-        transcript_preview = detail["transcript_preview"]
-        if transcript_preview:
-            console.print("", markup=False)
-            _print_plain_rows([("range", "range"), ("text", "text")], transcript_preview)
-        return
-
-    video = detail["video"]
-    metadata = Table(title="Video")
-    metadata.add_column("Field")
-    metadata.add_column("Value")
-    metadata.add_row("video_id", sanitize_terminal_text(video["video_id"]))
-    metadata.add_row("title", sanitize_terminal_text(video["title"]))
-    metadata.add_row("channel", sanitize_terminal_text(video["channel"]))
-    metadata.add_row("upload_date", sanitize_terminal_text(video["upload_date"]))
-    metadata.add_row("duration", sanitize_terminal_text(video["duration"]))
-    metadata.add_row("webpage_url", sanitize_terminal_text(video["webpage_url"]))
-    metadata.add_row("output_path", sanitize_terminal_text(video["output_path"] or "remote only"))
-    metadata.add_row("transcript_segments", sanitize_terminal_text(video["transcript_segments"]))
-    metadata.add_row("chapters", sanitize_terminal_text(video["chapters"]))
-    console.print(metadata)
-
-    chapters = detail["chapters"]
-    if chapters:
-        chapter_table = Table(title="Chapters")
-        chapter_table.add_column("#", justify="right")
-        chapter_table.add_column("Title")
-        chapter_table.add_column("Range")
-        for chapter in chapters:
-            chapter_table.add_row(
-                sanitize_terminal_text(chapter["position"]),
-                sanitize_terminal_text(chapter["title"]),
-                sanitize_terminal_text(chapter["range"]),
-            )
-        console.print(chapter_table)
-
-    subtitle_tracks = detail["subtitle_tracks"]
-    if subtitle_tracks:
-        track_table = Table(title="Subtitle Tracks")
-        track_table.add_column("Language")
-        track_table.add_column("Source")
-        track_table.add_column("Auto")
-        track_table.add_column("File")
-        for track in subtitle_tracks:
-            track_table.add_row(
-                sanitize_terminal_text(track["language"]),
-                sanitize_terminal_text(track["source"]),
-                "yes" if track["auto"] else "no",
-                sanitize_terminal_text(track["file"]),
-            )
-        console.print(track_table)
-
-    transcript_preview = detail["transcript_preview"]
-    if transcript_preview:
-        transcript_table = Table(title="Transcript Preview")
-        transcript_table.add_column("Range")
-        transcript_table.add_column("Text", overflow="fold")
-        for segment in transcript_preview:
-            transcript_table.add_row(
-                sanitize_terminal_text(segment["range"]),
-                sanitize_terminal_text(segment["text"]),
-            )
-        console.print(transcript_table)
+def _remove_cleanup_candidates(candidates: dict[str, list[Path]]) -> None:
+    for path in candidates["removed_cache_dirs"]:
+        shutil.rmtree(path, ignore_errors=True)
+    for path in candidates["removed_empty_dirs"]:
+        try:
+            path.rmdir()
+        except FileNotFoundError:
+            continue
+    for path in candidates["removed_part_files"]:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
 
 
-def _render_index_summary(summary: IndexSummary, *, title: str) -> None:
-    table = Table(title=title)
-    table.add_column("Metric")
-    table.add_column("Count", justify="right")
-    table.add_row("videos", str(summary.videos))
-    table.add_row("playlists", str(summary.playlists))
-    table.add_row("chapters", str(summary.chapters))
-    table.add_row("transcript_segments", str(summary.transcript_segments))
-    console.print(table)
+@app.command()
+def history(
+    limit: int = typer.Option(20, "--limit", min=1, help="Maximum downloads to show."),
+    channel: str | None = typer.Option(None, "--channel", help="Only show one channel."),
+    output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
+) -> None:
+    """Show recent downloads from the manifest."""
+
+    def _command() -> None:
+        settings = _load_settings(config)
+        rows = _history_rows(settings, limit=limit, channel=channel)
+        if not rows:
+            if _normalize_output_mode(output) == "json":
+                _print_json([])
+            else:
+                console.print("No download history found.")
+            return
+        _render_history_rows(rows, output_mode=output)
+
+    _run_guarded(_command, output_mode=output)
 
 
-def _index_payload(
-    *,
-    command: str,
-    requested: list[str],
-    summary: IndexSummary,
-    fetch_subs: bool,
-    auto_subs: bool,
-    dry_run: bool = False,
-    network_fetch_attempted: bool = False,
-) -> dict[str, Any]:
-    status = "noop" if dry_run or not any(_index_summary_payload(summary).values()) else "ok"
-    return _mutation_payload(
-        command=command,
-        status=status,
-        summary=_index_summary_payload(summary),
-        requested=requested,
-        fetch_subs=fetch_subs,
-        auto_subs=auto_subs,
-        network_fetch_attempted=network_fetch_attempted,
-        dry_run=dry_run,
-    )
+@app.command()
+def cleanup(
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="List orphaned artifacts without removing them."
+    ),
+    quiet: bool = typer.Option(False, "--quiet", help="Reduce non-essential output."),
+    output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
+) -> None:
+    """Remove orphaned subtitle cache directories, empty channel directories, and part files."""
 
+    def _command() -> None:
+        settings = _load_settings(config)
+        if dry_run:
+            candidates = _cleanup_candidates(settings)
+        else:
+            with operation_lock(_operation_lock_path(settings)):
+                candidates = _cleanup_candidates(settings)
+                _remove_cleanup_candidates(candidates)
+        payload = _cleanup_payload(candidates=candidates, dry_run=dry_run)
+        _render_cleanup_payload(payload, output_mode=output, quiet=quiet)
 
-def _render_index_payload(payload: dict[str, Any], *, output_mode: str, quiet: bool = False) -> None:
-    mode = _normalize_output_mode(output_mode)
-    if mode == "json":
-        _print_json(payload)
-        return
-    summary = payload["summary"]
-    if payload.get("dry_run"):
-        console.print(
-            f"Dry run: would index {sanitize_terminal_text(summary['videos'])} video(s) and {sanitize_terminal_text(summary['playlists'])} playlist(s).",
-            style="cyan",
-            markup=False,
-        )
-        return
-    if quiet:
-        return
-    _render_index_summary(
-        IndexSummary(
-            videos=int(summary["videos"]),
-            playlists=int(summary["playlists"]),
-            chapters=int(summary["chapters"]),
-            transcript_segments=int(summary["transcript_segments"]),
-        ),
-        title="Index Result",
-    )
-
-
-def _clip_grab_payload(
-    *,
-    locator: str,
-    extraction: Any | None,
-    mode: str,
-    padding_before: float,
-    padding_after: float,
-    dry_run: bool = False,
-) -> dict[str, Any]:
-    extraction_payload = extraction if isinstance(extraction, dict) else {}
-    status = "noop" if dry_run else "ok"
-    return _mutation_payload(
-        command="clips grab",
-        status=status,
-        summary={"saved": 0 if dry_run else 1, "dry_run": dry_run},
-        locator=locator,
-        start_seconds=extraction_payload.get("start_seconds"),
-        end_seconds=extraction_payload.get("end_seconds"),
-        padding_before=padding_before,
-        padding_after=padding_after,
-        mode=mode,
-        output_path=extraction_payload.get("output_path"),
-        output_path_is_template=bool(extraction_payload.get("output_path_is_template")),
-        source=extraction_payload.get("source"),
-        used_remote_fallback=extraction_payload.get("used_remote_fallback"),
-        dry_run=dry_run,
-    )
-
-
-def _render_clip_grab_payload(payload: dict[str, Any], *, output_mode: str, quiet: bool = False) -> None:
-    mode = _normalize_output_mode(output_mode)
-    if mode == "json":
-        _print_json(payload)
-        return
-    if payload.get("dry_run"):
-        console.print(
-            f"Dry run: would extract {sanitize_terminal_text(payload['locator'])} as a {sanitize_terminal_text(payload['mode'])} clip.",
-            style="cyan",
-            markup=False,
-        )
-        return
-    if quiet:
-        return
-    console.print(
-        f"Saved clip: {sanitize_terminal_text(payload['output_path'])} ({sanitize_terminal_text(payload['source'])})",
-        style="green",
-        markup=False,
-    )
-    if not quiet:
-        console.print("Next: run yt-agent library show VIDEO_ID or yt-agent tui.", markup=False)
-
-
-def _library_remove_payload(
-    *,
-    requested: list[str],
-    removed: list[str],
-    not_found: list[str],
-    dry_run: bool = False,
-) -> dict[str, Any]:
-    if dry_run:
-        status = "noop"
-    elif removed and not_found:
-        status = "partial"
-    elif removed:
-        status = "ok"
-    else:
-        status = "noop"
-    return _mutation_payload(
-        command="library remove",
-        status=status,
-        summary={"requested": len(requested), "removed": len(removed), "not_found": len(not_found), "dry_run": dry_run},
-        requested=requested,
-        removed=removed,
-        not_found=not_found,
-        dry_run=dry_run,
-    )
-
-
-def _render_library_remove_payload(payload: dict[str, Any], *, output_mode: str) -> None:
-    mode = _normalize_output_mode(output_mode)
-    if mode == "json":
-        _print_json(payload)
-        return
-    if payload.get("dry_run"):
-        console.print(
-            f"Dry run: would remove {sanitize_terminal_text(payload['summary']['removed'])} catalog entrie(s); {sanitize_terminal_text(payload['summary']['not_found'])} would remain missing.",
-            style="cyan",
-            markup=False,
-        )
-        return
-    if mode == "plain":
-        for vid in payload["removed"]:
-            console.print(f"removed\t{sanitize_terminal_text(vid)}", markup=False)
-        for vid in payload["not_found"]:
-            console.print(f"not_found\t{sanitize_terminal_text(vid)}", markup=False)
-        return
-    for vid in payload["removed"]:
-        console.print(f"Removed: {sanitize_terminal_text(vid)}", style="green", markup=False)
-    for vid in payload["not_found"]:
-        console.print(f"Not found: {sanitize_terminal_text(vid)}", style="yellow", markup=False)
+    _run_guarded(_command, output_mode=output)
 
 
 @app.command()
@@ -1457,7 +728,9 @@ def pick(
     query: str,
     limit: int | None = typer.Option(None, "--limit", min=1, help="Maximum result count."),
     use_fzf: bool = typer.Option(False, "--fzf", help="Use fzf for interactive selection."),
-    select: str | None = typer.Option(None, "--select", help="Choose result indexes without prompting, e.g. 1,3."),
+    select: str | None = typer.Option(
+        None, "--select", help="Choose result indexes without prompting, e.g. 1,3."
+    ),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
 ) -> None:
@@ -1489,7 +762,9 @@ def pick(
 @app.command()
 def info(
     target: str,
-    entries: bool = typer.Option(False, "--entries", help="For playlists, show individual entries."),
+    entries: bool = typer.Option(
+        False, "--entries", help="For playlists, show individual entries."
+    ),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
 ) -> None:
@@ -1506,7 +781,9 @@ def info(
 
 @app.command()
 def download(
-    targets: list[str] = typer.Argument(default=None, help="Video URLs, playlist URLs, or YouTube video ids."),
+    targets: list[str] = typer.Argument(
+        default=None, help="Video URLs, playlist URLs, or YouTube video ids."
+    ),
     from_file: Path | None = typer.Option(
         None,
         "--from-file",
@@ -1529,7 +806,9 @@ def download(
         "--auto-subs",
         help="Include auto-generated subtitles (requires --fetch-subs).",
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview resolved downloads without writing files."),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview resolved downloads without writing files."
+    ),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce non-essential output."),
     use_fzf: bool = typer.Option(False, "--fzf", help="Use fzf for playlist entry selection."),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
@@ -1538,62 +817,29 @@ def download(
     """Download videos into the organized local library."""
 
     def _command() -> None:
-        settings = _load_settings(config)
-        _validate_subtitle_flags(fetch_subs, auto_subs)
-        if _normalize_output_mode(output) == "json" and select_playlist and select is None:
-            raise InvalidInputError("--select-playlist with --output json requires --select.")
-        all_inputs: list[str] = list(targets or [])
-        if from_file is not None:
-            all_inputs.extend(_read_targets_from_file(from_file))
-        if not all_inputs:
-            raise InvalidInputError("No targets provided. Pass video URLs as arguments or use --from-file.")
-        mode = "audio" if audio or settings.default_mode == "audio" else "video"
-        resolve_kwargs: dict[str, Any] = {
-            "select_playlist": select_playlist or select is not None,
-            "use_fzf": use_fzf,
-            "render_selection": _normalize_output_mode(output) != "json",
-            "selection_output_mode": output,
-            "quiet": quiet or _normalize_output_mode(output) == "json",
-        }
-        if select is not None:
-            resolve_kwargs["selection"] = select
-        if dry_run:
-            resolved_targets, skipped_messages = _resolve_download_inputs(
-                all_inputs,
-                settings,
-                **resolve_kwargs,
-            )
-            items: list[DownloadOperationItem] = []
-        else:
-            with operation_lock(_operation_lock_path(settings)):
-                _prepare_storage(settings)
-                resolved_targets, skipped_messages = _resolve_download_inputs(
-                    all_inputs,
-                    settings,
-                    **resolve_kwargs,
-                )
-                items = _download_targets(
-                    resolved_targets,
-                    settings,
-                    mode=mode,
-                    fetch_subs=fetch_subs,
-                    auto_subs=auto_subs,
-                    quiet=quiet or _normalize_output_mode(output) == "json",
-                    show_failure_details=_normalize_output_mode(output) != "json",
-                ) if resolved_targets else []
-        payload = _download_operation_payload(
-            command="download",
-            requested=all_inputs,
-            resolved_targets=resolved_targets,
-            items=items,
-            mode=mode,
+        payload = _download_command_impl(
+            targets=list(targets or []),
+            from_file=from_file,
+            select_playlist=select_playlist,
+            select=select,
+            audio=audio,
             fetch_subs=fetch_subs,
             auto_subs=auto_subs,
-            download_root=settings.download_root,
             dry_run=dry_run,
-            skipped_messages=skipped_messages,
+            quiet=quiet,
+            use_fzf=use_fzf,
+            output=output,
+            config=config,
+            load_settings=_load_settings,
+            read_targets_from_file=_read_targets_from_file,
+            resolve_download_inputs=_resolve_download_inputs,
+            prepare_storage=_prepare_storage,
+            operation_lock_path=_operation_lock_path,
+            lock_factory=operation_lock,
+            download_targets_fn=_download_targets,
+            build_download_payload=_download_operation_payload,
+            render_download_payload=_render_download_payload,
         )
-        _render_download_payload(payload, output_mode=output, quiet=quiet)
         if not dry_run and int(payload["summary"]["failed"]) > 0:
             raise typer.Exit(code=int(ExitCode.EXTERNAL))
 
@@ -1605,7 +851,9 @@ def grab(
     query: str,
     limit: int | None = typer.Option(None, "--limit", min=1, help="Maximum result count."),
     use_fzf: bool = typer.Option(False, "--fzf", help="Use fzf for interactive selection."),
-    select: str | None = typer.Option(None, "--select", help="Choose result indexes without prompting, e.g. 1,3."),
+    select: str | None = typer.Option(
+        None, "--select", help="Choose result indexes without prompting, e.g. 1,3."
+    ),
     audio: bool = typer.Option(False, "--audio", help="Download audio only instead of video."),
     fetch_subs: bool = typer.Option(False, "--fetch-subs", help="Fetch subtitles during download."),
     auto_subs: bool = typer.Option(
@@ -1613,7 +861,9 @@ def grab(
         "--auto-subs",
         help="Include auto-generated subtitles (requires --fetch-subs).",
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview selected downloads without writing files."),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview selected downloads without writing files."
+    ),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce non-essential output."),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
@@ -1621,105 +871,29 @@ def grab(
     """Search, select, and download in one flow."""
 
     def _command() -> None:
-        settings = _load_settings(config)
-        _validate_subtitle_flags(fetch_subs, auto_subs)
-        mode = "audio" if audio or settings.default_mode == "audio" else "video"
-        if dry_run:
-            results = yt_dlp.search(query, limit=limit or settings.search_limit)
-            if not results:
-                if _normalize_output_mode(output) != "json":
-                    console.print("No matches found.")
-                    return
-                payload = _download_operation_payload(
-                    command="grab",
-                    requested=[query],
-                    resolved_targets=[],
-                    items=[],
-                    mode=mode,
-                    fetch_subs=fetch_subs,
-                    auto_subs=auto_subs,
-                    download_root=settings.download_root,
-                    dry_run=dry_run,
-                )
-                _render_download_payload(payload, output_mode=output, quiet=quiet)
-                return
-            _require_noninteractive_json_selection(output_mode=output, selection=select, action="grab")
-            if not quiet and _normalize_output_mode(output) != "json":
-                _render_results(
-                    results,
-                    title="Search Results",
-                    output_mode="table" if _normalize_output_mode(output) == "table" else "plain",
-                )
-            selected = _choose_results(
-                results,
-                selection=select,
-                prefer_fzf=use_fzf,
-                configured_selector=settings.selector,
-            )
-            targets = [
-                DownloadTarget(original_input=item.webpage_url, info=item, source_query=query)
-                for item in selected
-            ]
-            items: list[DownloadOperationItem] = []
-        else:
-            with operation_lock(_operation_lock_path(settings)):
-                results = yt_dlp.search(query, limit=limit or settings.search_limit)
-                if not results:
-                    if _normalize_output_mode(output) != "json":
-                        console.print("No matches found.")
-                        return
-                    payload = _download_operation_payload(
-                        command="grab",
-                        requested=[query],
-                        resolved_targets=[],
-                        items=[],
-                        mode=mode,
-                        fetch_subs=fetch_subs,
-                        auto_subs=auto_subs,
-                        download_root=settings.download_root,
-                        dry_run=dry_run,
-                    )
-                    _render_download_payload(payload, output_mode=output, quiet=quiet)
-                    return
-                _require_noninteractive_json_selection(output_mode=output, selection=select, action="grab")
-                if not quiet and _normalize_output_mode(output) != "json":
-                    _render_results(
-                        results,
-                        title="Search Results",
-                        output_mode="table" if _normalize_output_mode(output) == "table" else "plain",
-                    )
-                selected = _choose_results(
-                    results,
-                    selection=select,
-                    prefer_fzf=use_fzf,
-                    configured_selector=settings.selector,
-                )
-                targets = [
-                    DownloadTarget(original_input=item.webpage_url, info=item, source_query=query)
-                    for item in selected
-                ]
-                _prepare_storage(settings)
-                items = _download_targets(
-                    targets,
-                    settings,
-                    mode=mode,
-                    fetch_subs=fetch_subs,
-                    auto_subs=auto_subs,
-                    quiet=quiet or _normalize_output_mode(output) == "json",
-                    show_failure_details=_normalize_output_mode(output) != "json",
-                ) if targets else []
-        payload = _download_operation_payload(
-            command="grab",
-            requested=[query],
-            resolved_targets=targets,
-            items=items,
-            mode=mode,
+        payload = _grab_command_impl(
+            query=query,
+            limit=limit,
+            use_fzf=use_fzf,
+            select=select,
+            audio=audio,
             fetch_subs=fetch_subs,
             auto_subs=auto_subs,
-            download_root=settings.download_root,
             dry_run=dry_run,
+            quiet=quiet,
+            output=output,
+            config=config,
+            load_settings=_load_settings,
+            choose_results=_choose_results,
+            prepare_storage=_prepare_storage,
+            operation_lock_path=_operation_lock_path,
+            lock_factory=operation_lock,
+            download_targets_fn=_download_targets,
+            build_download_payload=_download_operation_payload,
+            render_download_payload=_render_download_payload,
         )
-        _render_download_payload(payload, output_mode=output, quiet=quiet)
+        if payload is None:
+            return
         if not dry_run and int(payload["summary"]["failed"]) > 0:
             raise typer.Exit(code=int(ExitCode.EXTERNAL))
 
@@ -1742,7 +916,11 @@ def config_init_command(
             )
         settings.config_path.write_text(render_default_config(), encoding="utf-8")
         ensure_private_file(settings.config_path)
-        console.print(f"Wrote config: {sanitize_terminal_text(settings.config_path)}", style="green", markup=False)
+        console.print(
+            f"Wrote config: {sanitize_terminal_text(settings.config_path)}",
+            style="green",
+            markup=False,
+        )
 
     _run_guarded(_command)
 
@@ -1810,8 +988,12 @@ def index_refresh_command(
         "--auto-subs/--manual-subs",
         help="Allow automatic subtitles when manuals are missing.",
     ),
-    lang: str | None = typer.Option(None, "--lang", help="Preferred subtitle language expression, e.g. en.*"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview refresh work without writing the catalog."),
+    lang: str | None = typer.Option(
+        None, "--lang", help="Preferred subtitle language expression, e.g. en.*"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview refresh work without writing the catalog."
+    ),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce non-essential output."),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
@@ -1835,7 +1017,9 @@ def index_refresh_command(
         else:
             with operation_lock(_operation_lock_path(settings)):
                 _prepare_storage(settings)
-                summary = index_refresh(settings, fetch_subs=fetch_subs, auto_subs=auto_subs, lang=lang)
+                summary = index_refresh(
+                    settings, fetch_subs=fetch_subs, auto_subs=auto_subs, lang=lang
+                )
             payload = _index_payload(
                 command="index refresh",
                 requested=["manifest"],
@@ -1863,8 +1047,12 @@ def index_add_command(
         "--auto-subs/--manual-subs",
         help="Allow automatic subtitles when manuals are missing.",
     ),
-    lang: str | None = typer.Option(None, "--lang", help="Preferred subtitle language expression, e.g. en.*"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview target indexing without writing the catalog."),
+    lang: str | None = typer.Option(
+        None, "--lang", help="Preferred subtitle language expression, e.g. en.*"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview target indexing without writing the catalog."
+    ),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce non-essential output."),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
@@ -1893,7 +1081,9 @@ def index_add_command(
         else:
             with operation_lock(_operation_lock_path(settings)):
                 _prepare_storage(settings)
-                summary = index_target(settings, target, fetch_subs=fetch_subs, auto_subs=auto_subs, lang=lang)
+                summary = index_target(
+                    settings, target, fetch_subs=fetch_subs, auto_subs=auto_subs, lang=lang
+                )
             result = _index_payload(
                 command="index add",
                 requested=[target],
@@ -1911,9 +1101,13 @@ def index_add_command(
 @clips_app.command("search")
 def clips_search_command(
     query: str,
-    source: str = typer.Option("all", "--source", help="Search source: transcript, chapters, or all."),
+    source: str = typer.Option(
+        "all", "--source", help="Search source: transcript, chapters, or all."
+    ),
     channel: str | None = typer.Option(None, "--channel", help="Limit results to one channel."),
-    lang: str | None = typer.Option(None, "--lang", help="Optional transcript language filter, e.g. en% or en.*"),
+    lang: str | None = typer.Option(
+        None, "--lang", help="Optional transcript language filter, e.g. en% or en.*"
+    ),
     limit: int = typer.Option(10, "--limit", min=1, help="Maximum clip hits to show."),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
@@ -1950,7 +1144,9 @@ def clips_show_command(
         if hit is None:
             raise InvalidInputError(f"Unknown clip result '{result_id}'.")
         payload = _clip_hit_row(hit)
-        payload["result_id_note"] = "Result ids are not durable across reindexing or catalog rebuilds."
+        payload["result_id_note"] = (
+            "Result ids are not durable across reindexing or catalog rebuilds."
+        )
         mode = _normalize_output_mode(output)
         if mode == "json":
             _print_json(payload)
@@ -1978,7 +1174,9 @@ def clips_show_command(
             value = payload[key]
             table.add_row(
                 sanitize_terminal_text(key),
-                sanitize_terminal_text("remote only" if key == "output_path" and not value else value),
+                sanitize_terminal_text(
+                    "remote only" if key == "output_path" and not value else value
+                ),
             )
         console.print(table)
 
@@ -1987,11 +1185,21 @@ def clips_show_command(
 
 @clips_app.command("grab")
 def clips_grab_command(
-    result_id: str | None = typer.Argument(None, help="Clip search result id like transcript:12 or chapter:3."),
-    video_id: str | None = typer.Option(None, "--video-id", help="Cataloged video id for explicit clip extraction."),
-    start_seconds: float | None = typer.Option(None, "--start-seconds", help="Explicit clip start in seconds."),
-    end_seconds: float | None = typer.Option(None, "--end-seconds", help="Explicit clip end in seconds."),
-    padding_before: float = typer.Option(0.0, "--padding-before", min=0.0, help="Seconds to prepend."),
+    result_id: str | None = typer.Argument(
+        None, help="Clip search result id like transcript:12 or chapter:3."
+    ),
+    video_id: str | None = typer.Option(
+        None, "--video-id", help="Cataloged video id for explicit clip extraction."
+    ),
+    start_seconds: float | None = typer.Option(
+        None, "--start-seconds", help="Explicit clip start in seconds."
+    ),
+    end_seconds: float | None = typer.Option(
+        None, "--end-seconds", help="Explicit clip end in seconds."
+    ),
+    padding_before: float = typer.Option(
+        0.0, "--padding-before", min=0.0, help="Seconds to prepend."
+    ),
     padding_after: float = typer.Option(0.0, "--padding-after", min=0.0, help="Seconds to append."),
     mode: str = typer.Option("fast", "--mode", help="Extraction mode: fast or accurate."),
     remote_fallback: bool = typer.Option(
@@ -1999,7 +1207,9 @@ def clips_grab_command(
         "--remote-fallback",
         help="Fallback to yt-dlp section download if local media is missing.",
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview the clip extraction without writing files."),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview the clip extraction without writing files."
+    ),
     quiet: bool = typer.Option(False, "--quiet", help="Reduce non-essential output."),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
@@ -2009,12 +1219,18 @@ def clips_grab_command(
     def _command() -> None:
         settings = _load_settings(config)
         normalized_mode = _validate_clip_mode(mode)
-        using_explicit_range = any(value is not None for value in (video_id, start_seconds, end_seconds))
+        using_explicit_range = any(
+            value is not None for value in (video_id, start_seconds, end_seconds)
+        )
         if using_explicit_range and result_id is not None:
-            raise InvalidInputError("Use either RESULT_ID or --video-id/--start-seconds/--end-seconds, not both.")
+            raise InvalidInputError(
+                "Use either RESULT_ID or --video-id/--start-seconds/--end-seconds, not both."
+            )
         if using_explicit_range:
             if video_id is None or start_seconds is None or end_seconds is None:
-                raise InvalidInputError("--video-id, --start-seconds, and --end-seconds are required together.")
+                raise InvalidInputError(
+                    "--video-id, --start-seconds, and --end-seconds are required together."
+                )
             if end_seconds <= start_seconds:
                 raise InvalidInputError("--end-seconds must be greater than --start-seconds.")
             locator = f"{video_id}:{start_seconds:.3f}-{end_seconds:.3f}"
@@ -2025,7 +1241,10 @@ def clips_grab_command(
 
         if dry_run:
             if using_explicit_range:
-                assert video_id is not None and start_seconds is not None and end_seconds is not None
+                if video_id is None or start_seconds is None or end_seconds is None:
+                    raise RuntimeError(
+                        "Clip range validation should guarantee explicit range values."
+                    )
                 preview = plan_clip_for_range(
                     settings,
                     video_id=video_id,
@@ -2035,7 +1254,8 @@ def clips_grab_command(
                     prefer_remote=remote_fallback,
                 )
             else:
-                assert result_id is not None
+                if result_id is None:
+                    raise RuntimeError("Clip validation should guarantee a result id.")
                 preview = plan_clip(
                     settings,
                     result_id,
@@ -2063,9 +1283,10 @@ def clips_grab_command(
             with operation_lock(_operation_lock_path(settings)):
                 _prepare_storage(settings)
                 if using_explicit_range:
-                    assert video_id is not None
-                    assert start_seconds is not None
-                    assert end_seconds is not None
+                    if video_id is None or start_seconds is None or end_seconds is None:
+                        raise RuntimeError(
+                            "Clip range validation should guarantee explicit range values."
+                        )
                     extraction = extract_clip_for_range(
                         settings,
                         video_id=video_id,
@@ -2075,7 +1296,8 @@ def clips_grab_command(
                         prefer_remote=remote_fallback,
                     )
                 else:
-                    assert result_id is not None
+                    if result_id is None:
+                        raise RuntimeError("Clip validation should guarantee a result id.")
                     extraction = extract_clip(
                         settings,
                         result_id,
@@ -2105,12 +1327,22 @@ def clips_grab_command(
 
 @library_app.command("list")
 def library_list_command(
-    channel: str | None = typer.Option(None, "--channel", help="Only show videos from one channel."),
+    channel: str | None = typer.Option(
+        None, "--channel", help="Only show videos from one channel."
+    ),
     playlist: str | None = typer.Option(None, "--playlist", help="Filter by playlist id or title."),
-    has_transcript: bool = typer.Option(False, "--has-transcript", help="Only show videos with indexed transcripts."),
-    no_transcript: bool = typer.Option(False, "--no-transcript", help="Only show videos without indexed transcripts."),
-    has_chapters: bool = typer.Option(False, "--has-chapters", help="Only show videos with indexed chapters."),
-    no_chapters: bool = typer.Option(False, "--no-chapters", help="Only show videos without indexed chapters."),
+    has_transcript: bool = typer.Option(
+        False, "--has-transcript", help="Only show videos with indexed transcripts."
+    ),
+    no_transcript: bool = typer.Option(
+        False, "--no-transcript", help="Only show videos without indexed transcripts."
+    ),
+    has_chapters: bool = typer.Option(
+        False, "--has-chapters", help="Only show videos with indexed chapters."
+    ),
+    no_chapters: bool = typer.Option(
+        False, "--no-chapters", help="Only show videos without indexed chapters."
+    ),
     limit: int = typer.Option(25, "--limit", min=1, help="Maximum videos to show."),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
@@ -2143,10 +1375,18 @@ def library_search_command(
     query: str,
     channel: str | None = typer.Option(None, "--channel", help="Only search one channel."),
     playlist: str | None = typer.Option(None, "--playlist", help="Filter by playlist id or title."),
-    has_transcript: bool = typer.Option(False, "--has-transcript", help="Only show videos with indexed transcripts."),
-    no_transcript: bool = typer.Option(False, "--no-transcript", help="Only show videos without indexed transcripts."),
-    has_chapters: bool = typer.Option(False, "--has-chapters", help="Only show videos with indexed chapters."),
-    no_chapters: bool = typer.Option(False, "--no-chapters", help="Only show videos without indexed chapters."),
+    has_transcript: bool = typer.Option(
+        False, "--has-transcript", help="Only show videos with indexed transcripts."
+    ),
+    no_transcript: bool = typer.Option(
+        False, "--no-transcript", help="Only show videos without indexed transcripts."
+    ),
+    has_chapters: bool = typer.Option(
+        False, "--has-chapters", help="Only show videos with indexed chapters."
+    ),
+    no_chapters: bool = typer.Option(
+        False, "--no-chapters", help="Only show videos without indexed chapters."
+    ),
     limit: int = typer.Option(25, "--limit", min=1, help="Maximum videos to show."),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
@@ -2304,8 +1544,12 @@ def library_playlists_command(
 
 @library_app.command("remove")
 def library_remove_command(
-    video_ids: list[str] = typer.Argument(..., help="One or more video IDs to remove from the catalog."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview catalog removals without writing changes."),
+    video_ids: list[str] = typer.Argument(
+        ..., help="One or more video IDs to remove from the catalog."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview catalog removals without writing changes."
+    ),
     output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
 ) -> None:
@@ -2327,7 +1571,9 @@ def library_remove_command(
                         removed.append(vid)
                     else:
                         not_found.append(vid)
-        payload = _library_remove_payload(requested=video_ids, removed=removed, not_found=not_found, dry_run=dry_run)
+        payload = _library_remove_payload(
+            requested=video_ids, removed=removed, not_found=not_found, dry_run=dry_run
+        )
         _render_library_remove_payload(payload, output_mode=output)
 
     _run_guarded(_command, output_mode=output)
@@ -2345,6 +1591,79 @@ def tui(
         launch_tui(settings)
 
     _run_guarded(_command)
+
+
+@completions_app.command("install")
+def completions_install_command(
+    shell: CompletionShell | None = typer.Option(
+        None, "--shell", help="Shell to install completion for."
+    ),
+    output: str = typer.Option("plain", "--output", help=READ_OUTPUT_HELP),
+) -> None:
+    """Install shell completion for yt-agent."""
+
+    def _command() -> None:
+        resolved_shell = _resolve_completion_shell(shell)
+        prog_name = _completion_prog_name()
+        installed_shell, installed_path = typer_completion_install(
+            shell=resolved_shell,
+            prog_name=prog_name,
+            complete_var=_completion_env_var(prog_name),
+        )
+        payload = _mutation_payload(
+            command="completions install",
+            status="ok",
+            summary={"installed": 1, "shell": installed_shell},
+            shell=installed_shell,
+            path=str(installed_path),
+            restart_required=True,
+        )
+        if _normalize_output_mode(output) == "json":
+            _print_json(payload)
+            return
+        console.print(
+            f"Installed {sanitize_terminal_text(installed_shell)} completion: "
+            f"{sanitize_terminal_text(installed_path)}",
+            style="green",
+            markup=False,
+        )
+        console.print("Restart your terminal to enable it.", markup=False)
+
+    _run_guarded(_command, output_mode=output)
+
+
+@completions_app.command("show")
+def completions_show_command(
+    shell: CompletionShell | None = typer.Option(
+        None, "--shell", help="Shell to print completion for."
+    ),
+    output: str = typer.Option("plain", "--output", help=READ_OUTPUT_HELP),
+) -> None:
+    """Print the shell completion script for yt-agent."""
+
+    def _command() -> None:
+        resolved_shell = _resolve_completion_shell(shell)
+        prog_name = _completion_prog_name()
+        script = get_completion_script(
+            prog_name=prog_name,
+            complete_var=_completion_env_var(prog_name),
+            shell=resolved_shell,
+        )
+        if _normalize_output_mode(output) == "json":
+            payload = _mutation_payload(
+                command="completions show",
+                status="ok",
+                summary={"lines": len(script.splitlines()), "shell": resolved_shell},
+                shell=resolved_shell,
+                script=script,
+            )
+            _print_json(payload)
+            return
+        console.file.write(script)
+        console.file.write("\n")
+        console.file.flush()
+
+    _run_guarded(_command, output_mode=output)
 
 
 def main() -> None:

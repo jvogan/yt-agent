@@ -73,6 +73,98 @@ def test_load_settings_rejects_empty_subtitle_languages(tmp_path: Path) -> None:
         load_settings(config_path)
 
 
+def test_load_settings_env_download_root_overrides_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(f'download_root = "{tmp_path / "from-toml"}"\n', encoding="utf-8")
+    override_root = tmp_path / "from-env"
+    monkeypatch.setenv("YT_AGENT_DOWNLOAD_ROOT", str(override_root))
+
+    settings = load_settings(config_path)
+
+    assert settings.download_root == override_root
+
+
+def test_load_settings_env_audio_format_overrides_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('audio_format = "worst"\n', encoding="utf-8")
+    monkeypatch.setenv("YT_AGENT_AUDIO_FORMAT", "bestaudio[ext=m4a]/best")
+
+    settings = load_settings(config_path)
+
+    assert settings.audio_format == "bestaudio[ext=m4a]/best"
+
+
+def test_load_settings_env_default_mode_overrides_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('default_mode = "video"\n', encoding="utf-8")
+    monkeypatch.setenv("YT_AGENT_DEFAULT_MODE", "audio")
+
+    settings = load_settings(config_path)
+
+    assert settings.default_mode == "audio"
+
+
+def test_load_settings_env_languages_overrides_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('subtitle_languages = "en"\n', encoding="utf-8")
+    monkeypatch.setenv("YT_AGENT_LANGUAGES", "ja.*,ja")
+
+    settings = load_settings(config_path)
+
+    assert settings.subtitle_languages == "ja.*,ja"
+
+
+def test_load_settings_ignores_unset_env_vars(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '\n'.join(
+            [
+                f'download_root = "{tmp_path / "from-toml"}"',
+                'audio_format = "best"',
+                'default_mode = "audio"',
+                'subtitle_languages = "fr"',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path, env={})
+
+    assert settings.download_root == tmp_path / "from-toml"
+    assert settings.audio_format == "best"
+    assert settings.default_mode == "audio"
+    assert settings.subtitle_languages == "fr"
+
+
+def test_load_settings_rejects_invalid_default_mode_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.toml"
+    monkeypatch.setenv("YT_AGENT_DEFAULT_MODE", "podcast")
+
+    with pytest.raises(ConfigError, match="default_mode"):
+        load_settings(config_path)
+
+
+def test_load_settings_rejects_empty_download_root_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.toml"
+    monkeypatch.setenv("YT_AGENT_DOWNLOAD_ROOT", "   ")
+
+    with pytest.raises(ConfigError, match="YT_AGENT_DOWNLOAD_ROOT"):
+        load_settings(config_path)
+
+
 def test_default_paths_use_appdata_on_windows() -> None:
     appdata = Path(r"C:\Users\demo\AppData\Roaming")
     local_appdata = Path(r"C:\Users\demo\AppData\Local")

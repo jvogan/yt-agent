@@ -9,6 +9,20 @@ from typing import Any
 
 from yt_agent.errors import InvalidInputError
 
+__all__ = [
+    "format_seconds",
+    "VideoInfo",
+    "DownloadTarget",
+    "ManifestRecord",
+    "ChapterEntry",
+    "SubtitleTrack",
+    "TranscriptSegment",
+    "CatalogVideo",
+    "ClipSearchHit",
+    "chapter_from_payload",
+]
+
+
 
 def _coerce_duration(value: Any) -> int | None:
     if value in (None, ""):
@@ -80,7 +94,7 @@ class VideoInfo:
     original_url: str | None = None
 
     @classmethod
-    def from_yt_dlp(cls, payload: dict[str, Any], *, original_url: str | None = None) -> "VideoInfo":
+    def from_yt_dlp(cls, payload: dict[str, Any], *, original_url: str | None = None) -> VideoInfo:
         video_id = str(payload.get("id") or "").strip()
         if not video_id:
             raise InvalidInputError("yt-dlp metadata did not include a video id.")
@@ -169,7 +183,7 @@ class ManifestRecord:
         output_path: Path,
         downloaded_at: datetime | None = None,
         info_json_path: Path | None = None,
-    ) -> "ManifestRecord":
+    ) -> ManifestRecord:
         ts = downloaded_at or datetime.now(UTC)
         return cls(
             video_id=target.info.video_id,
@@ -187,7 +201,7 @@ class ManifestRecord:
         )
 
     @classmethod
-    def from_dict(cls, values: dict[str, Any]) -> "ManifestRecord":
+    def from_dict(cls, values: dict[str, Any]) -> ManifestRecord:
         return cls(
             video_id=str(values.get("video_id") or ""),
             title=str(values.get("title") or "Untitled"),
@@ -198,9 +212,13 @@ class ManifestRecord:
             webpage_url=str(values.get("webpage_url") or ""),
             output_path=str(values.get("output_path") or ""),
             requested_input=str(values.get("requested_input") or ""),
-            source_query=values.get("source_query") if isinstance(values.get("source_query"), str) else None,
+            source_query=values.get("source_query")
+            if isinstance(values.get("source_query"), str)
+            else None,
             downloaded_at=str(values.get("downloaded_at") or ""),
-            info_json_path=str(values.get("info_json_path")) if values.get("info_json_path") else None,
+            info_json_path=str(values.get("info_json_path"))
+            if values.get("info_json_path")
+            else None,
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -376,4 +394,6 @@ def chapter_from_payload(index: int, payload: dict[str, Any]) -> ChapterEntry | 
         return None
     end_seconds = _coerce_float(payload.get("end_time"))
     title = str(payload.get("title") or f"Chapter {index + 1}").strip() or f"Chapter {index + 1}"
-    return ChapterEntry(position=index, title=title, start_seconds=start_seconds, end_seconds=end_seconds)
+    return ChapterEntry(
+        position=index, title=title, start_seconds=start_seconds, end_seconds=end_seconds
+    )

@@ -2,8 +2,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from yt_agent.catalog import CatalogStore
-from yt_agent.catalog import VideoUpsert
+from yt_agent.catalog import CatalogStore, VideoUpsert
 from yt_agent.indexer import (
     _index_transcripts,
     _load_info_json,

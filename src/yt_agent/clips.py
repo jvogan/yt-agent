@@ -13,6 +13,16 @@ from yt_agent.library import build_clip_output_path
 from yt_agent.models import ClipSearchHit, VideoInfo
 from yt_agent.yt_dlp import command_path, optional_tool_path
 
+__all__ = [
+    "ClipExtraction",
+    "PlannedClipExtraction",
+    "plan_clip",
+    "plan_clip_for_range",
+    "extract_clip",
+    "extract_clip_for_range",
+]
+
+
 
 @dataclass(frozen=True)
 class ClipExtraction:
@@ -54,12 +64,15 @@ def _video_info_from_hit(hit: ClipSearchHit) -> VideoInfo:
 
 
 def _run(args: list[str], message: str) -> None:
-    completed = subprocess.run(args, text=True, capture_output=True, check=False)
+    # Uses resolved tool paths and argument vectors without invoking a shell.
+    completed = subprocess.run(args, text=True, capture_output=True, check=False)  # noqa: S603
     if completed.returncode != 0:
         raise ExternalCommandError(message, stderr=completed.stderr.strip())
 
 
-def _clip_bounds(hit: ClipSearchHit, padding_before: float, padding_after: float) -> tuple[float, float]:
+def _clip_bounds(
+    hit: ClipSearchHit, padding_before: float, padding_after: float
+) -> tuple[float, float]:
     start = max(0.0, hit.start_seconds - padding_before)
     end = max(start + 0.1, hit.end_seconds + padding_after)
     return start, end
@@ -94,7 +107,9 @@ def _plan_resolved_clip(
             used_remote_fallback=False,
         )
     if not prefer_remote:
-        raise InvalidInputError("Local media is unavailable for this clip. Re-run with --remote-fallback.")
+        raise InvalidInputError(
+            "Local media is unavailable for this clip. Re-run with --remote-fallback."
+        )
     output_path = build_clip_output_path(
         settings.clips_root,
         info,
@@ -139,8 +154,20 @@ def _extract_resolved_clip(
 
     if plan.source == "local":
         ffmpeg = _ffmpeg_path()
-        assert media_path is not None
-        args = [ffmpeg, "-y", "-ss", f"{start_seconds:.3f}", "-to", f"{end_seconds:.3f}", "-i", str(media_path)]
+        if media_path is None:
+            raise InvalidInputError(
+                "Local media is unavailable for this clip. Re-run with --remote-fallback."
+            )
+        args = [
+            ffmpeg,
+            "-y",
+            "-ss",
+            f"{start_seconds:.3f}",
+            "-to",
+            f"{end_seconds:.3f}",
+            "-i",
+            str(media_path),
+        ]
         if mode == "fast":
             args.extend(["-c", "copy"])
         else:
@@ -155,7 +182,8 @@ def _extract_resolved_clip(
             used_remote_fallback=False,
         )
 
-    assert plan.output_template is not None
+    if plan.output_template is None:
+        raise RuntimeError("Remote clip extraction requires an output template.")
     args = [
         command_path(),
         "--quiet",
@@ -168,7 +196,9 @@ def _extract_resolved_clip(
         info.webpage_url,
     ]
     _run(args, "yt-dlp remote clip extraction failed.")
-    remote_output = next(iter(sorted(output_path.parent.glob(f"{output_path.stem}.*"))), output_path)
+    remote_output = next(
+        iter(sorted(output_path.parent.glob(f"{output_path.stem}.*"))), output_path
+    )
     return ClipExtraction(
         output_path=remote_output,
         source="remote",
@@ -267,7 +297,8 @@ def extract_clip(
     )
     catalog = CatalogStore(settings.catalog_file, readonly=True)
     hit = catalog.get_clip_hit(result_id, readonly=True)
-    assert hit is not None
+    if hit is None:
+        raise InvalidInputError(f"Unknown clip result: {result_id}")
     return _extract_resolved_clip(
         settings,
         _video_info_from_hit(hit),
@@ -299,7 +330,8 @@ def extract_clip_for_range(
     )
     catalog = CatalogStore(settings.catalog_file, readonly=True)
     video = catalog.get_video(video_id, readonly=True)
-    assert video is not None
+    if video is None:
+        raise InvalidInputError(f"Video id '{video_id}' is not in the catalog.")
     info = VideoInfo(
         video_id=video.video_id,
         title=video.title,

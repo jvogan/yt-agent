@@ -2,12 +2,27 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from contextlib import contextmanager
 import os
 import re
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
+
+__all__ = [
+    "ANSI_ESCAPE_RE",
+    "CONTROL_CHAR_RE",
+    "WHITESPACE_RE",
+    "POSIX_PRIVATE_DIR_MODE",
+    "POSIX_PRIVATE_FILE_MODE",
+    "sanitize_terminal_text",
+    "sanitize_json_payload",
+    "ensure_private_directory",
+    "ensure_private_file",
+    "protect_private_tree",
+    "operation_lock",
+]
+
 
 ANSI_ESCAPE_RE = re.compile(
     r"\x1b(?:"
@@ -39,7 +54,9 @@ def sanitize_json_payload(value: Any) -> Any:
     if isinstance(value, str):
         return sanitize_terminal_text(value)
     if isinstance(value, Mapping):
-        return {sanitize_terminal_text(key): sanitize_json_payload(item) for key, item in value.items()}
+        return {
+            sanitize_terminal_text(key): sanitize_json_payload(item) for key, item in value.items()
+        }
     if isinstance(value, list):
         return [sanitize_json_payload(item) for item in value]
     if isinstance(value, tuple):

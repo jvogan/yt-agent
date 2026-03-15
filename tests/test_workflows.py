@@ -11,7 +11,6 @@ from yt_agent.errors import StateLockError
 from yt_agent.models import DownloadTarget, ManifestRecord, VideoInfo
 from yt_agent.yt_dlp import DownloadExecution
 
-
 runner = CliRunner()
 
 

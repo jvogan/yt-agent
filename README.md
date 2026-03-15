@@ -49,14 +49,32 @@ yt-agent config init
 yt-agent config path
 ```
 
-More install detail and shell completion setup in [docs/getting-started.md](docs/getting-started.md).
+More install detail lives in [docs/getting-started.md](docs/getting-started.md). Shell-specific completion notes live in [docs/shell-completion.md](docs/shell-completion.md).
+
+## Docker
+
+The repo ships with a multi-stage `Dockerfile` that builds a wheel with `uv build` and installs it into a `python:3.12-slim` runtime image with both `yt-dlp` and `ffmpeg` preinstalled.
+
+```bash
+docker build -t yt-agent .
+docker run --rm -it yt-agent doctor
+```
+
+To use your local config or media directories, mount them into the container as needed:
+
+```bash
+docker run --rm -it \
+  -v "$HOME/.config/yt-agent:/root/.config/yt-agent" \
+  -v "$HOME/Media/YouTube:/root/Media/YouTube" \
+  yt-agent download "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+```
 
 ## Choose Your Path
 
-- [I already have a YouTube URL](#direct-download)
-- [I want to search or curate a playlist](#search-and-curate)
-- [I want to index a library and cut clips](#find-and-extract-clips)
-- [I want to drive this from Codex, Claude Code, Gemini CLI, opencode, or antigraviti](#agent-friendly-surface)
+- I already have a YouTube URL.
+- I want to search or curate a playlist.
+- I want to index a library and cut clips.
+- I want to drive this from Codex, Claude Code, Gemini CLI, opencode, or antigraviti.
 
 ## Core Workflows
 
@@ -239,6 +257,10 @@ Full matrix: [docs/support-matrix.md](docs/support-matrix.md)
 - Recipes overview: [docs/recipes.md](docs/recipes.md)
 - Troubleshooting: [docs/troubleshooting.md](docs/troubleshooting.md)
 - Command reference: [docs/command-reference.md](docs/command-reference.md)
+- Batch download script: [examples/scripts/batch-download-from-file.sh](examples/scripts/batch-download-from-file.sh)
+- Playlist preview script: [examples/scripts/playlist-curation-preview.sh](examples/scripts/playlist-curation-preview.sh)
+- Remote index + clip script: [examples/scripts/remote-index-and-clip.sh](examples/scripts/remote-index-and-clip.sh)
+- Library cleanup preview script: [examples/scripts/library-cleanup-preview.sh](examples/scripts/library-cleanup-preview.sh)
 - Approval-safe download: [examples/agents/approval-safe-download.md](examples/agents/approval-safe-download.md)
 - Playlist curator: [examples/agents/playlist-curator.md](examples/agents/playlist-curator.md)
 - Clip hunter: [examples/agents/clip-hunter.md](examples/agents/clip-hunter.md)
@@ -257,8 +279,10 @@ Full matrix: [docs/support-matrix.md](docs/support-matrix.md)
 ## Docs
 
 - [Getting Started](docs/getting-started.md)
+- [Shell Completion](docs/shell-completion.md)
 - [Concepts](docs/concepts.md)
 - [Agent Workflows](docs/agent-workflows.md)
+- [FAQ](docs/faq.md)
 - [Recipes](docs/recipes.md)
 - [Support Matrix](docs/support-matrix.md)
 - [Troubleshooting](docs/troubleshooting.md)

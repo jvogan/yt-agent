@@ -7,7 +7,6 @@ import pytest
 from yt_agent.catalog import CatalogStore, VideoUpsert, _fts_query
 from yt_agent.models import ChapterEntry, SubtitleTrack, TranscriptSegment
 
-
 ADVERSARIAL_LONG_TOKEN = "x" * 1001
 ADVERSARIAL_CJK = "\u4e16\u754c"
 ADVERSARIAL_EMOJI = "\U0001F600"
@@ -407,6 +406,34 @@ def test_delete_video_removes_video_and_fts_entries(tmp_path: Path) -> None:
     assert store.library_stats()["videos"] == 0
     assert store.search_clips("Intro", source="chapters") == []
     assert store.search_clips("hello", source="transcript") == []
+
+
+def test_delete_video_removes_subtitle_cache_dir(tmp_path: Path) -> None:
+    store = CatalogStore(tmp_path / "catalog.sqlite")
+    store.initialize()
+    store.upsert_video(
+        VideoUpsert(
+            video_id="abc123def45",
+            title="Demo Video",
+            channel="Channel",
+            upload_date=None,
+            duration_seconds=120,
+            extractor_key="youtube",
+            webpage_url="https://www.youtube.com/watch?v=abc123def45",
+            requested_input=None,
+            source_query=None,
+            output_path=None,
+            info_json_path=None,
+            downloaded_at=None,
+            indexed_at=datetime.now(UTC).isoformat(),
+        )
+    )
+    cache_dir = tmp_path / "subtitle-cache" / "abc123def45"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "demo.en.vtt").write_text("WEBVTT\n", encoding="utf-8")
+
+    assert store.delete_video("abc123def45") is True
+    assert not cache_dir.exists()
 
 
 def test_delete_video_returns_false_for_unknown_id(tmp_path: Path) -> None:

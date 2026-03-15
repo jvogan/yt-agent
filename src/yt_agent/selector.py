@@ -11,6 +11,14 @@ from yt_agent.errors import SelectionError
 from yt_agent.models import VideoInfo
 from yt_agent.security import sanitize_terminal_text
 
+__all__ = [
+    "parse_selection",
+    "prompt_for_selection",
+    "select_with_fzf",
+    "select_results",
+]
+
+
 
 def _format_line(index: int, result: VideoInfo) -> str:
     return "\t".join(
@@ -48,7 +56,9 @@ def parse_selection(selection: str, max_index: int) -> list[int]:
     return indexes
 
 
-def prompt_for_selection(results: list[VideoInfo], *, raw_selection: str | None = None) -> list[VideoInfo]:
+def prompt_for_selection(
+    results: list[VideoInfo], *, raw_selection: str | None = None
+) -> list[VideoInfo]:
     if not results:
         return []
     raw = raw_selection or Prompt.ask("Select result numbers (e.g. 1,3) or q to cancel")
@@ -61,8 +71,11 @@ def select_with_fzf(results: list[VideoInfo]) -> list[VideoInfo]:
     if fzf is None:
         raise SelectionError("fzf is not installed.")
 
-    payload = "\n".join(_format_line(index, result) for index, result in enumerate(results, start=1))
-    completed = subprocess.run(
+    payload = "\n".join(
+        _format_line(index, result) for index, result in enumerate(results, start=1)
+    )
+    # Uses the discovered fzf path and passes data via stdin without a shell.
+    completed = subprocess.run(  # noqa: S603
         [fzf, "--multi", "--with-nth=1,2,3,4,5"],
         input=payload,
         text=True,

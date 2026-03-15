@@ -7,6 +7,24 @@ from pathlib import Path
 
 from yt_agent.models import VideoInfo, format_seconds
 
+__all__ = [
+    "INVALID_PATH_CHARS",
+    "MULTISPACE",
+    "INVALID_ID_CHARS",
+    "INVALID_EXT_CHARS",
+    "sanitize_component",
+    "normalized_upload_date",
+    "sanitize_file_id",
+    "sanitize_extension",
+    "build_output_template",
+    "build_clip_output_path",
+    "info_json_path_for_media",
+    "alternate_info_json_path_for_media",
+    "discover_info_json",
+    "discover_subtitle_files",
+]
+
+
 INVALID_PATH_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 MULTISPACE = re.compile(r"\s+")
 INVALID_ID_CHARS = re.compile(r"[^A-Za-z0-9_-]+")
@@ -67,7 +85,9 @@ def build_clip_output_path(
     title = sanitize_component(info.title, "Untitled")
     safe_label = sanitize_component(label, "clip")
     file_id = sanitize_file_id(info.video_id)
-    timerange = f"{format_seconds(start_seconds).replace(':', '-')}_{format_seconds(end_seconds).replace(':', '-')}"
+    start_label = format_seconds(start_seconds).replace(":", "-")
+    end_label = format_seconds(end_seconds).replace(":", "-")
+    timerange = f"{start_label}_{end_label}"
     safe_extension = sanitize_extension(extension)
     filename = f"{title} [{file_id}] {timerange} {safe_label}.{safe_extension}"
     return clip_root / channel / filename
@@ -84,7 +104,10 @@ def alternate_info_json_path_for_media(media_path: Path) -> Path:
 
 
 def discover_info_json(media_path: Path) -> Path | None:
-    for candidate in (info_json_path_for_media(media_path), alternate_info_json_path_for_media(media_path)):
+    for candidate in (
+        info_json_path_for_media(media_path),
+        alternate_info_json_path_for_media(media_path),
+    ):
         if candidate.exists():
             return candidate
     return None

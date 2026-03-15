@@ -4,6 +4,19 @@ import pytest
 
 from yt_agent.config import Settings
 
+MARKER_DESCRIPTIONS = (
+    ("slow", "tests that take longer than five seconds to finish"),
+    ("integration", "tests that require a real yt-dlp binary"),
+)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    existing_markers = set(config.getini("markers"))
+    for marker, description in MARKER_DESCRIPTIONS:
+        marker_line = f"{marker}: {description}"
+        if marker_line not in existing_markers:
+            config.addinivalue_line("markers", marker_line)
+
 
 @pytest.fixture()
 def settings(tmp_path: Path) -> Settings:

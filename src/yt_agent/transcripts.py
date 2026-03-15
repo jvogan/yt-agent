@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from yt_agent.errors import ExternalCommandError
 from yt_agent.models import SubtitleTrack, TranscriptSegment
@@ -50,11 +50,16 @@ def _parse_vtt(path: Path) -> list[TranscriptSegment]:
         text = _normalize_text(lines[1:])
         if not text:
             continue
+        try:
+            start_seconds = _parse_timestamp(start_raw)
+            end_seconds = _parse_timestamp(end_raw)
+        except ValueError:
+            continue
         segments.append(
             TranscriptSegment(
                 segment_index=len(segments),
-                start_seconds=_parse_timestamp(start_raw),
-                end_seconds=_parse_timestamp(end_raw),
+                start_seconds=start_seconds,
+                end_seconds=end_seconds,
                 text=text,
             )
         )
@@ -80,11 +85,16 @@ def _parse_srt(path: Path) -> list[TranscriptSegment]:
         text = _normalize_text(body)
         if not text:
             continue
+        try:
+            start_seconds = _parse_timestamp(start_raw)
+            end_seconds = _parse_timestamp(end_raw)
+        except ValueError:
+            continue
         segments.append(
             TranscriptSegment(
                 segment_index=len(segments),
-                start_seconds=_parse_timestamp(start_raw),
-                end_seconds=_parse_timestamp(end_raw),
+                start_seconds=start_seconds,
+                end_seconds=end_seconds,
                 text=text,
             )
         )
@@ -148,7 +158,8 @@ def fetch_subtitle_sidecars(
         ]
         args.append("--write-auto-subs" if write_auto_subs else "--write-subs")
         args.append(normalize_target(target))
-        completed = subprocess.run(args, text=True, capture_output=True, check=False)
+        # Uses a normalized YouTube target and a resolved yt-dlp executable path.
+        completed = subprocess.run(args, text=True, capture_output=True, check=False)  # noqa: S603
         if completed.returncode != 0:
             stderr = completed.stderr.strip()
             raise ExternalCommandError("yt-dlp failed while fetching subtitles.", stderr=stderr)

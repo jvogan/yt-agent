@@ -6,6 +6,11 @@ from typing import Any
 
 from yt_agent.models import ChapterEntry, chapter_from_payload
 
+__all__ = [
+    "extract_chapters",
+]
+
+
 
 def extract_chapters(payload: dict[str, Any]) -> list[ChapterEntry]:
     chapters = payload.get("chapters")
@@ -20,4 +25,3 @@ def extract_chapters(payload: dict[str, Any]) -> list[ChapterEntry]:
         if parsed is not None:
             results.append(parsed)
     return results
-

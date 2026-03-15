@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import shlex
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,6 +18,22 @@ from yt_agent.config import Settings
 from yt_agent.errors import DependencyError, ExternalCommandError, InvalidInputError
 from yt_agent.library import build_output_template, discover_info_json
 from yt_agent.models import DownloadTarget, VideoInfo
+
+__all__ = [
+    "YOUTUBE_ID_RE",
+    "ALLOWED_YOUTUBE_HOSTS",
+    "DownloadExecution",
+    "ResolutionResult",
+    "command_path",
+    "optional_tool_path",
+    "normalize_target",
+    "search",
+    "fetch_info",
+    "resolve_payload",
+    "resolve_targets",
+    "download_target",
+]
+
 
 YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 _SUBPROCESS_TIMEOUT_SECONDS = 300  # 5 minutes
@@ -28,6 +47,7 @@ ALLOWED_YOUTUBE_HOSTS = {
     "youtube-nocookie.com",
     "www.youtube-nocookie.com",
 }
+logger = logging.getLogger("yt_agent")
 
 
 @dataclass(frozen=True)
@@ -65,7 +85,11 @@ def normalize_target(value: str) -> str:
     if stripped.startswith(("http://", "https://")):
         parsed = urlsplit(stripped)
         host = (parsed.hostname or "").rstrip(".").casefold()
-        if host not in ALLOWED_YOUTUBE_HOSTS and not host.endswith(".youtube.com") and not host.endswith(".youtube-nocookie.com"):
+        if (
+            host not in ALLOWED_YOUTUBE_HOSTS
+            and not host.endswith(".youtube.com")
+            and not host.endswith(".youtube-nocookie.com")
+        ):
             raise InvalidInputError("Only YouTube URLs are supported.")
         return stripped
     if YOUTUBE_ID_RE.fullmatch(stripped):
@@ -74,10 +98,25 @@ def normalize_target(value: str) -> str:
 
 
 def _run_json(args: list[str]) -> dict[str, Any]:
+    command = shlex.join(args)
+    start_time = time.perf_counter()
+    logger.debug("Running subprocess: %s", command)
     try:
-        completed = subprocess.run(args, text=True, capture_output=True, check=False, timeout=_SUBPROCESS_TIMEOUT_SECONDS)
+        # Uses a resolved yt-dlp path and normalized arguments without invoking a shell.
+        completed = subprocess.run(  # noqa: S603
+            args, text=True, capture_output=True, check=False, timeout=_SUBPROCESS_TIMEOUT_SECONDS
+        )
     except subprocess.TimeoutExpired as exc:
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        logger.debug("Subprocess timed out after %.2fms: %s", elapsed_ms, command)
         raise ExternalCommandError("yt-dlp timed out.") from exc
+    elapsed_ms = (time.perf_counter() - start_time) * 1000
+    logger.debug(
+        "Subprocess completed returncode=%s elapsed_ms=%.2f command=%s",
+        completed.returncode,
+        elapsed_ms,
+        command,
+    )
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
         raise ExternalCommandError("yt-dlp failed while extracting metadata.", stderr=stderr)
@@ -89,16 +128,33 @@ def _run_json(args: list[str]) -> dict[str, Any]:
 
 
 def _run_download(args: list[str]) -> DownloadExecution | None:
+    command = shlex.join(args)
+    start_time = time.perf_counter()
+    logger.debug("Running subprocess: %s", command)
     try:
-        completed = subprocess.run(args, text=True, capture_output=True, check=False, timeout=_SUBPROCESS_TIMEOUT_SECONDS)
+        # Uses a resolved yt-dlp path and normalized arguments without invoking a shell.
+        completed = subprocess.run(  # noqa: S603
+            args, text=True, capture_output=True, check=False, timeout=_SUBPROCESS_TIMEOUT_SECONDS
+        )
     except subprocess.TimeoutExpired as exc:
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        logger.debug("Subprocess timed out after %.2fms: %s", elapsed_ms, command)
         raise ExternalCommandError("yt-dlp timed out.") from exc
+    elapsed_ms = (time.perf_counter() - start_time) * 1000
+    logger.debug(
+        "Subprocess completed returncode=%s elapsed_ms=%.2f command=%s",
+        completed.returncode,
+        elapsed_ms,
+        command,
+    )
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
         raise ExternalCommandError("yt-dlp download failed.", stderr=stderr)
 
     lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
-    output_path = next((Path(line) for line in reversed(lines) if not line.startswith("[debug]")), None)
+    output_path = next(
+        (Path(line) for line in reversed(lines) if not line.startswith("[debug]")), None
+    )
     if output_path is None:
         return None  # yt-dlp exited 0 with no output — archive skip
     return DownloadExecution(output_path=output_path, stdout=completed.stdout)
@@ -129,14 +185,20 @@ def resolve_payload(
     if isinstance(entries, list):
         for index, entry in enumerate(entries, start=1):
             if not entry:
-                skipped_messages.append(f"Skipped unavailable playlist entry #{index} from {user_input}.")
+                skipped_messages.append(
+                    f"Skipped unavailable playlist entry #{index} from {user_input}."
+                )
                 continue
             try:
                 info = VideoInfo.from_yt_dlp(entry, original_url=user_input)
             except InvalidInputError:
-                skipped_messages.append(f"Skipped playlist entry #{index} from {user_input}: missing id.")
+                skipped_messages.append(
+                    f"Skipped playlist entry #{index} from {user_input}: missing id."
+                )
                 continue
-            targets.append(DownloadTarget(original_input=user_input, info=info, source_query=source_query))
+            targets.append(
+                DownloadTarget(original_input=user_input, info=info, source_query=source_query)
+            )
         return ResolutionResult(targets=targets, skipped_messages=skipped_messages)
 
     info = VideoInfo.from_yt_dlp(payload, original_url=user_input)

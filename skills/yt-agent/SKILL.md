@@ -5,21 +5,16 @@ description: Use when a task needs terminal-first YouTube search, playlist curat
 
 # yt-agent
 
-Use this skill when the repo or machine has `yt-agent` available and the task involves YouTube search, download, indexing, catalog browsing, or clip extraction from the terminal.
-
-## Core contract
-
-- Use `--output json` whenever output will be parsed.
-- Use `--select` on commands that would otherwise prompt.
-- Use `--dry-run` before any approval-gated mutation.
-- Use `--quiet` on the approved mutation to reduce terminal chatter.
-- Treat clip result IDs like `transcript:12` as short-lived handles.
-- Mutating commands are serialized by a local operation lock. Exit code `7` means another mutation is already running.
-- `index refresh` and `index add` are local-first by default. Add `--fetch-subs` when transcript coverage matters.
+Use this skill when the machine has `yt-agent` available and the task involves YouTube search, download, indexing, catalog browsing, download history inspection, cleanup, or clip extraction from the terminal.
 
 ## Install and verify
 
+Install the public package from PyPI:
+
 ```bash
+uv tool install yt-agent
+# or
+pipx install yt-agent
 yt-agent doctor --output json
 ```
 
@@ -30,7 +25,25 @@ If `yt-dlp` is missing, install it first:
 
 `ffmpeg` is required for local clip extraction. `fzf` is optional.
 
-## Preferred workflows
+Shell completion setup:
+
+```bash
+yt-agent --install-completion
+```
+
+## Core contract
+
+- Use `--output json` whenever output will be parsed.
+- Use `--select` on commands that would otherwise prompt.
+- Use `--dry-run` before any approval-gated mutation.
+- Use `--quiet` on the approved mutation to reduce terminal chatter.
+- Treat clip result IDs like `transcript:12` as short-lived handles.
+- Mutating commands are serialized by a local operation lock. Exit code `7` means another mutation is already running.
+- `index refresh` and `index add` are local-first by default. Add `--fetch-subs` when transcript coverage matters.
+- `history` is read-only and reports recent manifest-backed downloads.
+- `cleanup` can remove orphaned subtitle cache directories, empty channel directories, and partial files, so preview it with `--dry-run` first.
+
+## Common commands
 
 ### Approval-safe search and download
 
@@ -64,6 +77,28 @@ yt-agent library search "query" --output json
 yt-agent library remove VIDEO_ID --dry-run --output json
 ```
 
+### History and cleanup
+
+```bash
+yt-agent history --limit 20 --output json
+yt-agent history --channel "Channel Name" --output json
+yt-agent cleanup --dry-run --output json
+# wait for approval
+yt-agent cleanup --quiet --output json
+```
+
+## Command map
+
+- Discovery: `search`, `pick`, `info`
+- Downloads: `grab`, `download`
+- Cataloging: `index refresh`, `index add`
+- Clips: `clips search`, `clips show`, `clips grab`
+- Library: `library stats`, `library list`, `library search`, `library show`, `library channels`, `library playlists`, `library remove`
+- Local state: `history`, `cleanup`, `config init`, `config path`, `config validate`
+- Interactive UI: `tui`
+- Shell setup: `yt-agent --install-completion`
+- This repo snapshot does not expose `export` or `import` subcommands. Do not assume they exist unless `yt-agent --help` in the target environment shows them.
+
 ## Safety notes
 
 - Do not mutate until the user has approved the specific download, clip, or removal step.
@@ -73,7 +108,9 @@ yt-agent library remove VIDEO_ID --dry-run --output json
 
 ## Read next when needed
 
-- Operator guide: `/Users/jacobvogan/github_2/youtube_cli/docs/agent-workflows.md`
-- Concepts and local state: `/Users/jacobvogan/github_2/youtube_cli/docs/concepts.md`
-- Recipes: `/Users/jacobvogan/github_2/youtube_cli/docs/recipes.md`
-- Prompt examples: `/Users/jacobvogan/github_2/youtube_cli/examples/agents/`
+- Getting started: [`../../docs/getting-started.md`](../../docs/getting-started.md)
+- Operator guide: [`../../docs/agent-workflows.md`](../../docs/agent-workflows.md)
+- Command reference: [`../../docs/command-reference.md`](../../docs/command-reference.md)
+- Concepts and local state: [`../../docs/concepts.md`](../../docs/concepts.md)
+- Recipes: [`../../docs/recipes.md`](../../docs/recipes.md)
+- Prompt examples: [`../../examples/agents/`](../../examples/agents/)

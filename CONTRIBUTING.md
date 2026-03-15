@@ -17,6 +17,21 @@ uv run pytest
 uv build
 ```
 
+## Pre-commit Hooks
+
+Install `pre-commit` locally, then enable the repository hooks:
+
+```bash
+uv tool install pre-commit
+pre-commit install
+```
+
+To run the full hook suite on demand:
+
+```bash
+pre-commit run --all-files
+```
+
 ## Local Security Checks
 
 Run a full-history secret scan before opening a PR or cutting a release:

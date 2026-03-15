@@ -8,6 +8,13 @@ from pathlib import Path
 from yt_agent.models import ManifestRecord
 from yt_agent.security import ensure_private_file
 
+__all__ = [
+    "ensure_manifest_file",
+    "append_manifest_record",
+    "iter_manifest_records",
+]
+
+
 
 def ensure_manifest_file(path: Path) -> None:
     ensure_private_file(path)

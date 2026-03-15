@@ -2,6 +2,8 @@
 
 These are the fastest paths through `yt-agent` for both direct terminal use and approval-safe agent use.
 
+Runnable shell examples live under [examples/scripts/](../examples/scripts/). Use them as copy-paste starters, then swap in your own URLs, IDs, and search queries.
+
 ## Four core workflows
 
 | Workflow | Best for | Human-first path | Agent-safe path |
@@ -93,6 +95,8 @@ yt-agent download --from-file targets.txt
 yt-agent download --from-file targets.txt --dry-run --output json
 ```
 
+Starter script: [examples/scripts/batch-download-from-file.sh](../examples/scripts/batch-download-from-file.sh)
+
 ## Remote-only indexing
 
 Index a target into the catalog without downloading media first:
@@ -109,6 +113,8 @@ Use `index refresh` when you already have manifest-backed local downloads:
 yt-agent index refresh
 yt-agent index refresh --fetch-subs --output json
 ```
+
+Starter script: [examples/scripts/remote-index-and-clip.sh](../examples/scripts/remote-index-and-clip.sh)
 
 ## Index and extract clips
 
@@ -127,6 +133,8 @@ Explicit clip coordinates:
 yt-agent clips grab --video-id VIDEO_ID --start-seconds 12.5 --end-seconds 18.0
 yt-agent clips grab --video-id VIDEO_ID --start-seconds 12.5 --end-seconds 18.0 --dry-run --output json
 ```
+
+Starter script: [examples/scripts/remote-index-and-clip.sh](../examples/scripts/remote-index-and-clip.sh)
 
 ## Library cleanup
 
@@ -154,6 +162,15 @@ yt-agent library remove VIDEO_ID
 ```
 
 `library remove` updates the catalog only. It does not delete media files.
+
+Starter script: [examples/scripts/library-cleanup-preview.sh](../examples/scripts/library-cleanup-preview.sh)
+
+## Runnable script examples
+
+- Batch download: [examples/scripts/batch-download-from-file.sh](../examples/scripts/batch-download-from-file.sh)
+- Playlist preview: [examples/scripts/playlist-curation-preview.sh](../examples/scripts/playlist-curation-preview.sh)
+- Remote index + clip: [examples/scripts/remote-index-and-clip.sh](../examples/scripts/remote-index-and-clip.sh)
+- Library cleanup preview: [examples/scripts/library-cleanup-preview.sh](../examples/scripts/library-cleanup-preview.sh)
 
 ## Operator safety defaults
 

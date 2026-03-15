@@ -172,9 +172,16 @@ class FakeStatic:
         self.content = content
 
 
+class FakeInput:
+    def __init__(self, *, input_id: str = "filter", value: str = "") -> None:
+        self.id = input_id
+        self.value = value
+
+
 @dataclass
 class TuiHarness:
     app: YtAgentTui
+    filter_input: FakeInput
     list_view: FakeListView
     table: FakeDataTable
     details: FakeStatic
@@ -183,18 +190,26 @@ class TuiHarness:
 
 def make_harness(catalog: FakeCatalog) -> TuiHarness:
     app = YtAgentTui(catalog)
+    filter_input = FakeInput()
     list_view = FakeListView()
     table = FakeDataTable()
     details = FakeStatic()
     notifications: list[tuple[str, str | None]] = []
-    widgets = {"#sources": list_view, "#videos": table, "#details": details}
+    widgets = {"#filter": filter_input, "#sources": list_view, "#videos": table, "#details": details}
 
     def fake_query_one(selector: str, expected_type: Any) -> Any:
         return widgets[selector]
 
     app.query_one = fake_query_one  # type: ignore[method-assign]
     app.notify = lambda message, severity=None: notifications.append((message, severity))  # type: ignore[method-assign]
-    return TuiHarness(app=app, list_view=list_view, table=table, details=details, notifications=notifications)
+    return TuiHarness(
+        app=app,
+        filter_input=filter_input,
+        list_view=list_view,
+        table=table,
+        details=details,
+        notifications=notifications,
+    )
 
 
 def test_on_mount_populates_sources_and_initial_video() -> None:
@@ -268,6 +283,42 @@ def test_apply_source_renders_large_result_sets_and_selects_first_video() -> Non
     assert harness.table.row_count == 120
     assert harness.table.row_keys[0] == "video-000"
     assert harness.app.selected_video_id == "video-000"
+
+
+def test_input_filter_matches_title_and_channel_case_insensitively_and_clears() -> None:
+    alpha = make_video("video-1", title="Alpha Build", channel="Main Channel")
+    beta = make_video("video-2", title="Release Notes", channel="Beta Crew")
+    gamma = make_video("video-3", title="Gamma", channel="Elsewhere")
+    catalog = FakeCatalog(
+        all_videos=[alpha, beta, gamma],
+        details={
+            alpha.video_id: make_details(alpha),
+            beta.video_id: make_details(beta),
+            gamma.video_id: make_details(gamma),
+        },
+    )
+    harness = make_harness(catalog)
+
+    harness.app._apply_source(SourceItem("all", "All Videos"))
+    assert harness.table.row_keys == ["video-1", "video-2", "video-3"]
+
+    harness.filter_input.value = "bEtA"
+    harness.app.on_input_changed(SimpleNamespace(input=harness.filter_input, value=harness.filter_input.value))
+
+    assert harness.table.row_keys == ["video-2"]
+    assert harness.app.selected_video_id == "video-2"
+
+    harness.filter_input.value = "alpha"
+    harness.app.on_input_changed(SimpleNamespace(input=harness.filter_input, value=harness.filter_input.value))
+
+    assert harness.table.row_keys == ["video-1"]
+    assert harness.app.selected_video_id == "video-1"
+
+    harness.filter_input.value = ""
+    harness.app.on_input_changed(SimpleNamespace(input=harness.filter_input, value=harness.filter_input.value))
+
+    assert harness.table.row_keys == ["video-1", "video-2", "video-3"]
+    assert harness.app.selected_video_id == "video-1"
 
 
 def test_set_selected_video_handles_missing_payload_and_limits_preview_sections() -> None:

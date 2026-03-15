@@ -1,12 +1,14 @@
 import json
 import sqlite3
 import stat
+import subprocess
 import sys
 
 import pytest
 import typer
 from typer.testing import CliRunner
 
+from yt_agent.catalog import CatalogStore, VideoUpsert
 from yt_agent.cli import _run_guarded, app
 from yt_agent.errors import (
     ConfigError,
@@ -16,10 +18,18 @@ from yt_agent.errors import (
     SelectionError,
     StateLockError,
 )
-from yt_agent.models import CatalogVideo, ChapterEntry, ClipSearchHit, DownloadTarget, SubtitleTrack, TranscriptSegment, VideoInfo
+from yt_agent.models import (
+    CatalogVideo,
+    ChapterEntry,
+    ClipSearchHit,
+    DownloadTarget,
+    ManifestRecord,
+    SubtitleTrack,
+    TranscriptSegment,
+    VideoInfo,
+)
 from yt_agent.security import operation_lock
 from yt_agent.yt_dlp import DownloadExecution, ResolutionResult
-
 
 runner = CliRunner()
 
@@ -78,6 +88,59 @@ def _clip_hit(result_id: str = "transcript:12") -> ClipSearchHit:
     )
 
 
+def _manifest_record(
+    video_id: str,
+    *,
+    title: str = "Demo",
+    channel: str = "Channel",
+    downloaded_at: str = "2026-03-08T00:00:00Z",
+) -> ManifestRecord:
+    return ManifestRecord(
+        video_id=video_id,
+        title=title,
+        channel=channel,
+        upload_date="2026-03-07",
+        duration_seconds=91,
+        extractor_key="youtube",
+        webpage_url=f"https://www.youtube.com/watch?v={video_id}",
+        output_path=f"/tmp/{video_id}.mp4",
+        requested_input=f"https://www.youtube.com/watch?v={video_id}",
+        source_query=None,
+        downloaded_at=downloaded_at,
+        info_json_path=None,
+    )
+
+
+def _write_manifest(settings, records: list[ManifestRecord]) -> None:
+    settings.manifest_file.parent.mkdir(parents=True, exist_ok=True)
+    settings.manifest_file.write_text(
+        "\n".join(json.dumps(record.as_dict(), sort_keys=True) for record in records) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _upsert_catalog_video(settings, video_id: str, *, channel: str = "Channel") -> None:
+    store = CatalogStore(settings.catalog_file)
+    store.ensure_schema()
+    store.upsert_video(
+        VideoUpsert(
+            video_id=video_id,
+            title="Demo",
+            channel=channel,
+            upload_date="2026-03-07",
+            duration_seconds=91,
+            extractor_key="youtube",
+            webpage_url=f"https://www.youtube.com/watch?v={video_id}",
+            requested_input=f"https://www.youtube.com/watch?v={video_id}",
+            source_query=None,
+            output_path=settings.download_root / channel / f"{video_id}.mp4",
+            info_json_path=None,
+            downloaded_at="2026-03-08T00:00:00Z",
+            indexed_at="2026-03-08T00:00:00Z",
+        )
+    )
+
+
 def test_doctor_returns_dependency_exit_code_when_yt_dlp_missing(settings, monkeypatch) -> None:
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
     monkeypatch.setattr("yt_agent.cli.shutil.which", lambda _: None)
@@ -90,6 +153,110 @@ def test_version_flag_prints_package_version() -> None:
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
     assert "yt-agent" in result.stdout
+
+
+def test_completions_install_detects_shell_from_env(monkeypatch, tmp_path) -> None:
+    installed_path = tmp_path / "_yt-agent"
+    observed: dict[str, str] = {}
+
+    def fake_install(*, shell, prog_name, complete_var):
+        observed["shell"] = shell
+        observed["prog_name"] = prog_name
+        observed["complete_var"] = complete_var
+        return shell, installed_path
+
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    monkeypatch.setattr("yt_agent.cli.typer_completion_install", fake_install)
+
+    result = runner.invoke(app, ["completions", "install"])
+
+    assert result.exit_code == 0
+    assert observed == {
+        "shell": "zsh",
+        "prog_name": "yt-agent",
+        "complete_var": "_YT_AGENT_COMPLETE",
+    }
+    assert "Installed zsh completion" in result.stdout
+    assert str(installed_path) in result.stdout.replace("\n", "")
+    assert "Restart your terminal to enable it." in result.stdout
+    assert result.stderr == ""
+
+
+def test_completions_install_shell_flag_overrides_env(monkeypatch, tmp_path) -> None:
+    installed_path = tmp_path / "yt-agent.bash"
+    observed: dict[str, str] = {}
+
+    def fake_install(*, shell, prog_name, complete_var):
+        observed["shell"] = shell
+        return shell, installed_path
+
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    monkeypatch.setattr("yt_agent.cli.typer_completion_install", fake_install)
+
+    result = runner.invoke(app, ["completions", "install", "--shell", "bash", "--output", "json"])
+
+    assert result.exit_code == 0
+    assert observed["shell"] == "bash"
+    assert json.loads(result.stdout) == {
+        "schema_version": 1,
+        "command": "completions install",
+        "status": "ok",
+        "summary": {"installed": 1, "shell": "bash"},
+        "warnings": [],
+        "errors": [],
+        "shell": "bash",
+        "path": str(installed_path),
+        "restart_required": True,
+    }
+    assert result.stderr == ""
+
+
+def test_completions_show_prints_script(monkeypatch) -> None:
+    script = "complete -F _yt_agent_completion yt-agent"
+    observed: dict[str, str] = {}
+
+    def fake_get_completion_script(*, prog_name, complete_var, shell):
+        observed["prog_name"] = prog_name
+        observed["complete_var"] = complete_var
+        observed["shell"] = shell
+        return script
+
+    monkeypatch.setenv("SHELL", "/usr/local/bin/fish")
+    monkeypatch.setattr("yt_agent.cli.get_completion_script", fake_get_completion_script)
+
+    result = runner.invoke(app, ["completions", "show"])
+
+    assert result.exit_code == 0
+    assert observed == {
+        "prog_name": "yt-agent",
+        "complete_var": "_YT_AGENT_COMPLETE",
+        "shell": "fish",
+    }
+    assert result.stdout == f"{script}\n"
+    assert result.stderr == ""
+
+
+def test_completions_show_json_output(monkeypatch) -> None:
+    script = "line1\nline2"
+    monkeypatch.setattr(
+        "yt_agent.cli.get_completion_script",
+        lambda *, prog_name, complete_var, shell: script,
+    )
+
+    result = runner.invoke(app, ["completions", "show", "--shell", "zsh", "--output", "json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {
+        "schema_version": 1,
+        "command": "completions show",
+        "status": "ok",
+        "summary": {"lines": 2, "shell": "zsh"},
+        "warnings": [],
+        "errors": [],
+        "shell": "zsh",
+        "script": script,
+    }
+    assert result.stderr == ""
 
 
 def test_doctor_json_output_is_machine_readable(settings, monkeypatch) -> None:
@@ -165,6 +332,125 @@ def test_search_with_no_results_exits_zero(settings, monkeypatch) -> None:
     result = runner.invoke(app, ["search", "demo"])
     assert result.exit_code == 0
     assert "No matches found." in result.stdout
+
+
+def test_verbose_search_json_logs_debug_to_stderr(settings, monkeypatch) -> None:
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+    monkeypatch.setattr("yt_agent.yt_dlp.command_path", lambda: "/usr/bin/yt-dlp")
+    monkeypatch.setattr(
+        "yt_agent.yt_dlp.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "entries": [
+                        {
+                            "id": "abc123def45",
+                            "title": "Demo",
+                            "channel": "Channel",
+                            "duration": 91,
+                            "extractor_key": "youtube",
+                            "webpage_url": "https://www.youtube.com/watch?v=abc123def45",
+                            "upload_date": "20260307",
+                        }
+                    ]
+                }
+            ),
+            stderr="",
+        ),
+    )
+
+    result = runner.invoke(app, ["--verbose", "search", "demo", "--output", "json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload[0]["video_id"] == "abc123def45"
+    assert "Running subprocess:" in result.stderr
+    assert "/usr/bin/yt-dlp --dump-single-json --no-warnings ytsearch10:demo" in result.stderr
+    assert "Finished command callback=_command elapsed_ms=" in result.stderr
+
+
+def test_history_table_shows_recent_manifest_downloads_newest_first(settings, monkeypatch) -> None:
+    _write_manifest(
+        settings,
+        [
+            _manifest_record("old123abc45", title="Old", downloaded_at="2026-03-08T00:00:00Z"),
+            _manifest_record("new123abc45", title="New", downloaded_at="2026-03-09T00:00:00Z"),
+        ],
+    )
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+
+    result = runner.invoke(app, ["history"])
+
+    assert result.exit_code == 0
+    assert "Download History" in result.stdout
+    assert result.stdout.index("New") < result.stdout.index("Old")
+    assert "new123abc45" in result.stdout
+    assert "old123abc45" in result.stdout
+
+
+def test_history_json_output_returns_structured_array(settings, monkeypatch) -> None:
+    _write_manifest(
+        settings,
+        [_manifest_record("abc123def45", title="Demo", downloaded_at="2026-03-08T00:00:00Z")],
+    )
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+
+    result = runner.invoke(app, ["history", "--output", "json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload == [
+        {
+            "video_id": "abc123def45",
+            "title": "Demo",
+            "channel": "Channel",
+            "downloaded_at": "2026-03-08T00:00:00Z",
+        }
+    ]
+
+
+def test_history_limit_applies(settings, monkeypatch) -> None:
+    _write_manifest(
+        settings,
+        [
+            _manifest_record(
+                f"video{i:08d}"[-11:],
+                title=f"Video {i}",
+                downloaded_at=f"2026-03-{i + 1:02d}T00:00:00Z",
+            )
+            for i in range(1, 7)
+        ],
+    )
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+
+    result = runner.invoke(app, ["history", "--limit", "5", "--output", "json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert len(payload) == 5
+    assert payload[0]["title"] == "Video 6"
+    assert payload[-1]["title"] == "Video 2"
+
+
+def test_history_channel_filter_applies(settings, monkeypatch) -> None:
+    _write_manifest(
+        settings,
+        [
+            _manifest_record("abc123def45", channel="Alpha"),
+            _manifest_record("def123abc45", channel="Beta"),
+            _manifest_record("ghi123abc45", channel="Alpha"),
+        ],
+    )
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+
+    result = runner.invoke(app, ["history", "--channel", "Alpha", "--output", "json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert [row["channel"] for row in payload] == ["Alpha", "Alpha"]
+    assert [row["video_id"] for row in payload] == ["ghi123abc45", "abc123def45"]
 
 
 def test_search_json_output_is_machine_readable(settings, monkeypatch) -> None:
@@ -509,6 +795,20 @@ def test_library_stats_json_output(settings, monkeypatch) -> None:
     result = runner.invoke(app, ["library", "stats", "--output", "json"])
     assert result.exit_code == 0
     assert '"videos": 3' in result.stdout
+
+
+def test_verbose_library_stats_logs_sql_queries(settings, monkeypatch) -> None:
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+    _upsert_catalog_video(settings, "abc123def45")
+
+    result = runner.invoke(app, ["--verbose", "library", "stats", "--output", "json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["videos"] == 1
+    assert "SQL: PRAGMA foreign_keys = ON" in result.stderr
+    assert "SQL:" in result.stderr
+    assert "SELECT" in result.stderr
 
 
 def test_config_init_writes_starter_file(settings, monkeypatch, tmp_path) -> None:
@@ -1221,6 +1521,117 @@ def test_mutating_command_returns_json_busy_error_when_operation_lock_is_held(se
         "message": "Another yt-agent operation is already running.",
     }
     assert not settings.catalog_file.exists()
+
+
+def test_cleanup_dry_run_lists_orphans_without_removing(settings, monkeypatch) -> None:
+    _upsert_catalog_video(settings, "abc123def45")
+    valid_cache_dir = settings.catalog_file.parent / "subtitle-cache" / "abc123def45"
+    orphan_cache_dir = settings.catalog_file.parent / "subtitle-cache" / "orphan987654"
+    valid_cache_dir.mkdir(parents=True, exist_ok=True)
+    orphan_cache_dir.mkdir(parents=True, exist_ok=True)
+    empty_dir = settings.download_root / "Empty Channel"
+    empty_dir.mkdir(parents=True, exist_ok=True)
+    part_file = settings.download_root / "Channel" / "video.mp4.part"
+    part_file.parent.mkdir(parents=True, exist_ok=True)
+    part_file.write_text("partial", encoding="utf-8")
+    complete_file = settings.download_root / "Channel" / "video.mp4"
+    complete_file.write_text("complete", encoding="utf-8")
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+
+    result = runner.invoke(app, ["cleanup", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "Dry run:" in result.stdout
+    assert "Cleanup Preview" in result.stdout
+    assert orphan_cache_dir.name in result.stdout
+    assert empty_dir.name in result.stdout
+    assert part_file.name in result.stdout
+    assert orphan_cache_dir.exists()
+    assert empty_dir.exists()
+    assert part_file.exists()
+    assert valid_cache_dir.exists()
+    assert complete_file.exists()
+
+
+def test_cleanup_dry_run_json_reports_orphans(settings, monkeypatch) -> None:
+    orphan_cache_dir = settings.catalog_file.parent / "subtitle-cache" / "orphan987654"
+    orphan_cache_dir.mkdir(parents=True, exist_ok=True)
+    empty_dir = settings.download_root / "Empty Channel"
+    empty_dir.mkdir(parents=True, exist_ok=True)
+    part_file = settings.download_root / "Channel" / "video.mp4.part"
+    part_file.parent.mkdir(parents=True, exist_ok=True)
+    part_file.write_text("partial", encoding="utf-8")
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+
+    result = runner.invoke(app, ["cleanup", "--dry-run", "--output", "json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["command"] == "cleanup"
+    assert payload["status"] == "noop"
+    assert payload["summary"] == {
+        "removed_cache_dirs": 1,
+        "removed_empty_dirs": 1,
+        "removed_part_files": 1,
+        "dry_run": True,
+    }
+    assert payload["removed_cache_dirs"] == [str(orphan_cache_dir)]
+    assert payload["removed_empty_dirs"] == [str(empty_dir)]
+    assert payload["removed_part_files"] == [str(part_file)]
+    assert payload["dry_run"] is True
+    assert orphan_cache_dir.exists()
+    assert empty_dir.exists()
+    assert part_file.exists()
+
+
+def test_cleanup_removes_orphaned_artifacts(settings, monkeypatch) -> None:
+    _upsert_catalog_video(settings, "abc123def45")
+    valid_cache_dir = settings.catalog_file.parent / "subtitle-cache" / "abc123def45"
+    orphan_cache_dir = settings.catalog_file.parent / "subtitle-cache" / "orphan987654"
+    valid_cache_dir.mkdir(parents=True, exist_ok=True)
+    orphan_cache_dir.mkdir(parents=True, exist_ok=True)
+    empty_dir = settings.download_root / "Empty Channel"
+    empty_dir.mkdir(parents=True, exist_ok=True)
+    part_file = settings.download_root / "Channel" / "video.mp4.part"
+    part_file.parent.mkdir(parents=True, exist_ok=True)
+    part_file.write_text("partial", encoding="utf-8")
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+
+    result = runner.invoke(app, ["cleanup", "--output", "json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["summary"] == {
+        "removed_cache_dirs": 1,
+        "removed_empty_dirs": 1,
+        "removed_part_files": 1,
+        "dry_run": False,
+    }
+    assert not orphan_cache_dir.exists()
+    assert not empty_dir.exists()
+    assert not part_file.exists()
+    assert valid_cache_dir.exists()
+
+
+def test_cleanup_returns_json_busy_error_when_operation_lock_is_held(settings, monkeypatch) -> None:
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+    settings.catalog_file.parent.mkdir(parents=True, exist_ok=True)
+
+    with operation_lock(settings.catalog_file.parent / "operation.lock"):
+        result = runner.invoke(app, ["cleanup", "--output", "json"])
+
+    assert result.exit_code == 7
+    assert result.stdout == ""
+    payload = json.loads(result.stderr)
+    assert payload == {
+        "schema_version": 1,
+        "status": "error",
+        "exit_code": 7,
+        "error_type": "StateLockError",
+        "message": "Another yt-agent operation is already running.",
+    }
 
 
 def test_run_guarded_catches_yt_agent_error_json(capsys) -> None:

@@ -4,12 +4,30 @@ from __future__ import annotations
 
 import os
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from yt_agent.errors import ConfigError
 from yt_agent.security import ensure_private_directory
+
+__all__ = [
+    "DefaultPaths",
+    "DEFAULT_CONFIG_PATH",
+    "DEFAULT_DOWNLOAD_ROOT",
+    "DEFAULT_ARCHIVE_FILE",
+    "DEFAULT_MANIFEST_FILE",
+    "DEFAULT_CATALOG_FILE",
+    "DEFAULT_CLIPS_ROOT",
+    "ALLOWED_SELECTOR_VALUES",
+    "ALLOWED_DEFAULT_MODES",
+    "ENV_VAR_CONFIG_KEYS",
+    "Settings",
+    "load_settings",
+    "render_default_config",
+]
+
 
 
 @dataclass(frozen=True)
@@ -98,6 +116,12 @@ DEFAULT_CLIPS_ROOT = _DEFAULT_PATHS.clips_root
 
 ALLOWED_SELECTOR_VALUES = {"prompt", "fzf"}
 ALLOWED_DEFAULT_MODES = {"video", "audio"}
+ENV_VAR_CONFIG_KEYS = {
+    "YT_AGENT_DOWNLOAD_ROOT": "download_root",
+    "YT_AGENT_AUDIO_FORMAT": "audio_format",
+    "YT_AGENT_DEFAULT_MODE": "default_mode",
+    "YT_AGENT_LANGUAGES": "subtitle_languages",
+}
 
 
 def _expand_path(value: str | Path) -> Path:
@@ -123,6 +147,21 @@ def _int_value(values: dict[str, Any], key: str, default: int) -> int:
 def _str_value(values: dict[str, Any], key: str, default: str) -> str:
     value = values.get(key, default)
     return str(_require_type(key, value, str))
+
+
+def _apply_env_overrides(
+    values: Mapping[str, Any],
+    env: Mapping[str, str],
+) -> dict[str, Any]:
+    overridden = dict(values)
+    for env_key, config_key in ENV_VAR_CONFIG_KEYS.items():
+        value = env.get(env_key)
+        if value is None:
+            continue
+        if not value.strip():
+            raise ConfigError(f"Environment variable '{env_key}' must not be empty.")
+        overridden[config_key] = value
+    return overridden
 
 
 @dataclass(frozen=True)
@@ -156,10 +195,15 @@ class Settings:
         ensure_private_directory(self.config_path.parent)
 
 
-def load_settings(config_path: Path | None = None) -> Settings:
+def load_settings(
+    config_path: Path | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> Settings:
     """Load settings from disk, falling back to defaults."""
 
-    defaults = _default_paths()
+    current_env = env or os.environ
+    defaults = _default_paths(env=current_env)
     resolved_config_path = _expand_path(config_path or defaults.config_path)
     values: dict[str, Any] = {}
     if resolved_config_path.exists():
@@ -190,6 +234,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
     if unexpected_keys:
         joined = ", ".join(sorted(unexpected_keys))
         raise ConfigError(f"Unknown config key(s): {joined}")
+    values = _apply_env_overrides(values, current_env)
 
     settings = Settings(
         config_path=resolved_config_path,
@@ -234,24 +279,41 @@ def render_default_config(
     """Return the canonical starter config content."""
 
     defaults = _default_paths(platform=platform, env=env, home=home)
+    rendered_paths = {
+        "download_root": _render_path_for_config(
+            defaults.download_root, platform=platform, env=env, home=home
+        ),
+        "archive_file": _render_path_for_config(
+            defaults.archive_file, platform=platform, env=env, home=home
+        ),
+        "manifest_file": _render_path_for_config(
+            defaults.manifest_file, platform=platform, env=env, home=home
+        ),
+        "catalog_file": _render_path_for_config(
+            defaults.catalog_file, platform=platform, env=env, home=home
+        ),
+        "clips_root": _render_path_for_config(
+            defaults.clips_root, platform=platform, env=env, home=home
+        ),
+    }
     return "\n".join(
         [
-            f'download_root = "{_render_path_for_config(defaults.download_root, platform=platform, env=env, home=home)}"',
-            f'archive_file = "{_render_path_for_config(defaults.archive_file, platform=platform, env=env, home=home)}"',
-            f'manifest_file = "{_render_path_for_config(defaults.manifest_file, platform=platform, env=env, home=home)}"',
-            f'catalog_file = "{_render_path_for_config(defaults.catalog_file, platform=platform, env=env, home=home)}"',
-            f'clips_root = "{_render_path_for_config(defaults.clips_root, platform=platform, env=env, home=home)}"',
-            'search_limit = 10',
+            f'download_root = "{rendered_paths["download_root"]}"',
+            f'archive_file = "{rendered_paths["archive_file"]}"',
+            f'manifest_file = "{rendered_paths["manifest_file"]}"',
+            f'catalog_file = "{rendered_paths["catalog_file"]}"',
+            f'clips_root = "{rendered_paths["clips_root"]}"',
+            "search_limit = 10",
             'video_format = "bv*+ba/b"',
             'audio_format = "bestaudio/best"',
             'default_mode = "video"',
             'selector = "prompt"',
             'subtitle_languages = "en.*,en"',
-            'write_thumbnail = true',
-            'write_description = true',
-            'write_info_json = true',
-            'embed_metadata = true',
-            'embed_thumbnail = false',
+            "write_thumbnail = true",
+            "write_description = true",
+            "write_info_json = true",
+            "embed_metadata = true",
+            "embed_thumbnail = false",
             "",
         ]
     )

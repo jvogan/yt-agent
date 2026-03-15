@@ -14,12 +14,21 @@ from rich.markup import escape
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal
 from textual.reactive import reactive
-from textual.widgets import DataTable, Footer, Header, Label, ListItem, ListView, Static
+from textual.widgets import DataTable, Footer, Header, Input, Label, ListItem, ListView, Static
 
 from yt_agent.catalog import CatalogStore, VideoDetails
 from yt_agent.config import Settings
 from yt_agent.models import CatalogVideo
 from yt_agent.security import sanitize_terminal_text
+
+__all__ = [
+    "CatalogLike",
+    "SourceItem",
+    "YtAgentTui",
+    "launch_tui",
+    "open_with_system_default",
+]
+
 
 
 class CatalogLike(Protocol):
@@ -57,6 +66,10 @@ class YtAgentTui(App[None]):
         height: 1fr;
     }
 
+    #filter {
+        margin: 0 1;
+    }
+
     #sources {
         width: 28;
         border: solid $panel;
@@ -84,15 +97,18 @@ class YtAgentTui(App[None]):
 
     selected_source: reactive[SourceItem | None] = reactive(None)
     selected_video_id: reactive[str | None] = reactive(None)
+    filter_text: reactive[str] = reactive("")
 
     def __init__(self, catalog: CatalogLike) -> None:
         super().__init__()
         self.catalog = catalog
         self._source_items: list[SourceItem] = []
+        self._source_videos: list[CatalogVideo] = []
         self._videos: list[CatalogVideo] = []
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
+        yield Input(placeholder="Filter videos by title or channel", id="filter")
         with Horizontal(id="main"):
             yield ListView(id="sources")
             yield DataTable(id="videos")
@@ -116,7 +132,8 @@ class YtAgentTui(App[None]):
         self._source_items = [SourceItem("all", "All Videos")]
         # Keep raw filter values for queries, but sanitize labels before they reach Textual widgets.
         self._source_items.extend(
-            SourceItem("channel", sanitize_terminal_text(channel), channel) for channel in self.catalog.list_channels()
+            SourceItem("channel", sanitize_terminal_text(channel), channel)
+            for channel in self.catalog.list_channels()
         )
         self._source_items.extend(
             SourceItem(
@@ -138,7 +155,22 @@ class YtAgentTui(App[None]):
 
     def _apply_source(self, item: SourceItem) -> None:
         self.selected_source = item
-        self._videos = self._load_videos_for_source(item)
+        self._source_videos = self._load_videos_for_source(item)
+        self._apply_filter()
+
+    def _apply_filter(self) -> None:
+        query = self.filter_text.strip().lower()
+        if not query:
+            self._videos = list(self._source_videos)
+        else:
+            self._videos = [
+                video
+                for video in self._source_videos
+                if query in video.title.lower() or query in video.channel.lower()
+            ]
+        self._render_videos()
+
+    def _render_videos(self) -> None:
         table = self.query_one("#videos", DataTable)
         table.clear()
         for video in self._videos:
@@ -157,11 +189,20 @@ class YtAgentTui(App[None]):
         else:
             self._set_selected_video(None)
 
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id != "filter":
+            return
+        self.filter_text = event.value
+        self._apply_filter()
+
     def _set_selected_video(self, video_id: str | None) -> None:
         self.selected_video_id = video_id
         details = self.query_one("#details", Static)
         if video_id is None:
-            details.update("No videos found for this source.")
+            if self.filter_text.strip():
+                details.update("No videos match the current filter.")
+            else:
+                details.update("No videos found for this source.")
             return
         payload = self.catalog.get_video_details(video_id)
         if payload is None:
@@ -184,12 +225,16 @@ class YtAgentTui(App[None]):
         ]
         if chapters:
             lines.append("Chapters:")
-            lines.extend(f"- {escape(sanitize_terminal_text(chapter.title))}" for chapter in chapters[:5])
+            lines.extend(
+                f"- {escape(sanitize_terminal_text(chapter.title))}" for chapter in chapters[:5]
+            )
         if preview:
             if chapters:
                 lines.append("")
             lines.append("Transcript Preview:")
-            lines.extend(f"- {escape(sanitize_terminal_text(segment.text))}" for segment in preview[:5])
+            lines.extend(
+                f"- {escape(sanitize_terminal_text(segment.text))}" for segment in preview[:5]
+            )
         details.update("\n".join(lines))
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
@@ -230,7 +275,10 @@ class YtAgentTui(App[None]):
             self.notify("Local media path is missing on disk.", severity="warning")
             return
         if not open_with_system_default(path):
-            self.notify("Opening local media is only supported on macOS, Linux, and Windows.", severity="warning")
+            self.notify(
+                "Opening local media is only supported on macOS, Linux, and Windows.",
+                severity="warning",
+            )
             return
         self.notify(f"Opened {sanitize_terminal_text(path.name)}")
 
@@ -261,15 +309,18 @@ def open_with_system_default(path: Path) -> bool:
         launcher = shutil.which("open")
         if launcher is None:
             return False
-        subprocess.Popen([launcher, str(path)])
+        # Uses the platform launcher discovered on PATH and passes a single file path.
+        subprocess.Popen([launcher, str(path)])  # noqa: S603
         return True
     if sys.platform.startswith("linux"):
         launcher = shutil.which("xdg-open")
         if launcher is None:
             return False
-        subprocess.Popen([launcher, str(path)])
+        # Uses the platform launcher discovered on PATH and passes a single file path.
+        subprocess.Popen([launcher, str(path)])  # noqa: S603
         return True
     if sys.platform == "win32":
-        os.startfile(str(path))  # type: ignore[attr-defined]
+        # Windows startfile delegates to the OS shell for a user-selected local file only.
+        os.startfile(str(path))  # type: ignore[attr-defined]  # noqa: S606
         return True
     return False

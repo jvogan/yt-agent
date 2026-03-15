@@ -17,6 +17,15 @@ from yt_agent.manifest import iter_manifest_records
 from yt_agent.models import ManifestRecord, SubtitleTrack, TranscriptSegment, VideoInfo
 from yt_agent.transcripts import fetch_subtitle_sidecars, infer_subtitle_track, parse_subtitle_file
 
+__all__ = [
+    "IndexSummary",
+    "catalog_for_settings",
+    "index_manifest_record",
+    "index_refresh",
+    "index_target",
+]
+
+
 
 @dataclass(frozen=True)
 class IndexSummary:
@@ -27,7 +36,7 @@ class IndexSummary:
     chapters: int = 0
     transcript_segments: int = 0
 
-    def merge(self, other: "IndexSummary") -> "IndexSummary":
+    def merge(self, other: IndexSummary) -> IndexSummary:
         return IndexSummary(
             videos=self.videos + other.videos,
             playlists=self.playlists + other.playlists,
@@ -72,7 +81,9 @@ def _index_transcripts(
     auto_subs: bool,
     lang: str | None,
 ) -> int:
-    subtitle_paths = discover_subtitle_files(media_path) if media_path and media_path.exists() else []
+    subtitle_paths = (
+        discover_subtitle_files(media_path) if media_path and media_path.exists() else []
+    )
     info_payload = _load_info_json(info_json_path)
     if not subtitle_paths and fetch_subs:
         fetched_info_json, fetched_subtitle_paths = fetch_subtitle_sidecars(
@@ -274,7 +285,9 @@ def index_target(
                 PlaylistUpsert(
                     playlist_id=playlist_id,
                     title=str(payload.get("title") or "Untitled Playlist"),
-                    channel=str(payload.get("channel") or payload.get("uploader") or "Unknown Channel"),
+                    channel=str(
+                        payload.get("channel") or payload.get("uploader") or "Unknown Channel"
+                    ),
                     webpage_url=str(payload.get("webpage_url") or target),
                     position=position,
                 ),

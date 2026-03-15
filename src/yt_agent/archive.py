@@ -7,6 +7,13 @@ from pathlib import Path
 from yt_agent.models import VideoInfo
 from yt_agent.security import ensure_private_file
 
+__all__ = [
+    "ensure_archive_file",
+    "load_archive_entries",
+    "is_archived",
+]
+
+
 
 def ensure_archive_file(path: Path) -> None:
     ensure_private_file(path)

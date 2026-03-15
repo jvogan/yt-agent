@@ -25,6 +25,8 @@ for module_name in (
     "tui",
     "yt_dlp",
 ):
-    sys.modules.setdefault(f"{__name__}.{module_name}", importlib.import_module(f"yt_agent.{module_name}"))
+    sys.modules.setdefault(
+        f"{__name__}.{module_name}", importlib.import_module(f"yt_agent.{module_name}")
+    )
 
 __all__ = ["__version__"]

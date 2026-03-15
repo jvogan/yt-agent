@@ -14,6 +14,17 @@ This document explains what `yt-agent` stores locally and how the major workflow
 
 The manifest is an append-only audit trail. The SQLite catalog is the query layer for `library`, `clips search`, and the TUI.
 
+## Config precedence
+
+Runtime settings load from `config.toml` first, then apply these environment-variable overrides when set:
+
+- `YT_AGENT_DOWNLOAD_ROOT` overrides `download_root`
+- `YT_AGENT_AUDIO_FORMAT` overrides `audio_format`
+- `YT_AGENT_DEFAULT_MODE` overrides `default_mode`
+- `YT_AGENT_LANGUAGES` overrides `subtitle_languages`
+
+Unset variables do nothing. Set variables take precedence over TOML. Invalid override values fail config loading the same way invalid TOML values do.
+
 ## What `download` and `grab` do
 
 - Resolve video or playlist targets through `yt-dlp`

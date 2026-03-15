@@ -89,7 +89,9 @@ The generated config uses the same defaults as [`config/config.sample.toml`](../
 yt-agent --install-completion
 ```
 
-This works for `zsh`, `bash`, `fish`, and `powershell`. Restart your shell after installing.
+Run that command from the shell you want to configure. The detailed guide covers the generated file locations, verification commands, and troubleshooting for `bash`, `zsh`, and `fish`.
+
+For shell-by-shell notes and team-friendly setup guidance, see [shell-completion.md](shell-completion.md).
 
 ## Quick workflows
 
@@ -189,3 +191,5 @@ For troubleshooting, workflow recipes, operator-safe agent prompts, and the supp
 - [docs/agent-workflows.md](agent-workflows.md)
 - [docs/support-matrix.md](support-matrix.md)
 - [docs/troubleshooting.md](troubleshooting.md)
+- [docs/shell-completion.md](shell-completion.md)
+- [docs/faq.md](faq.md)
