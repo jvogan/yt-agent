@@ -36,6 +36,15 @@ This is the compact command map for `yt-agent`. Use it when you already understa
 | `library playlists` | List indexed playlists | `--output json` |
 | `library remove VIDEO_ID...` | Remove catalog rows without deleting media files | `--dry-run`, `--output json` |
 
+## Data management commands
+
+| Command | Purpose | Common flags |
+|---|---|---|
+| `export DEST` | Export the local catalog to a JSON or CSV file | `--format`, `--limit`, `--output json` |
+| `import SRC` | Import catalog entries from a JSON file (created by `export`) | `--dry-run`, `--output json` |
+| `history` | Show recent downloads from the manifest | `--limit`, `--channel`, `--output json` |
+| `cleanup` | Remove orphaned subtitle caches, empty channel dirs, and `.part` files | `--dry-run`, `--quiet`, `--output json` |
+
 ## Config and UI commands
 
 | Command | Purpose | Common flags |
@@ -44,6 +53,13 @@ This is the compact command map for `yt-agent`. Use it when you already understa
 | `config path` | Show config and data paths | `--output json` |
 | `config validate` | Validate the active config | `--config` |
 | `tui` | Launch the Textual catalog browser | `--config` |
+
+## Shell completions
+
+| Command | Purpose | Common flags |
+|---|---|---|
+| `completions install` | Install shell completion for yt-agent | `--shell`, `--output json` |
+| `completions show` | Print the shell completion script to stdout | `--shell`, `--output json` |
 
 ## Output and automation contract
 

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import csv
 import importlib
+import io
+import json
 import logging
 import os
 import shutil
@@ -10,6 +13,7 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, cast
@@ -28,6 +32,7 @@ from yt_agent.errors import (
     ExitCode,
     ExternalCommandError,
     InvalidInputError,
+    StorageError,
     YtAgentError,
 )
 from yt_agent.library import sanitize_file_id
@@ -636,6 +641,181 @@ def _remove_cleanup_candidates(candidates: dict[str, list[Path]]) -> None:
             path.unlink()
         except FileNotFoundError:
             continue
+
+
+_EXPORT_FORMAT_CHOICES = {"json", "csv"}
+
+
+@app.command(help="Export the local catalog to a JSON or CSV file.")
+def export(
+    dest: Path = typer.Argument(..., help="Output file path (.json or .csv)."),
+    format: str | None = typer.Option(  # noqa: A002
+        None,
+        "--format",
+        help="Export format: json or csv. Inferred from file extension if omitted.",
+    ),
+    limit: int = typer.Option(
+        10000, "--limit", min=1, help="Maximum catalog entries to export."
+    ),
+    output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
+) -> None:
+    """Export the local catalog to a JSON or CSV file."""
+
+    def _command() -> None:
+        settings = _load_settings(config)
+        resolved_format = format
+        if resolved_format is None:
+            suffix = dest.suffix.lower().lstrip(".")
+            resolved_format = suffix if suffix in _EXPORT_FORMAT_CHOICES else "json"
+        resolved_format = resolved_format.lower().strip()
+        if resolved_format not in _EXPORT_FORMAT_CHOICES:
+            raise InvalidInputError(
+                f"Export format must be one of: {', '.join(sorted(_EXPORT_FORMAT_CHOICES))}"
+            )
+        store = _catalog(settings, readonly=True)
+        videos = store.list_videos(limit=limit)
+        rows = [_catalog_video_row(video) for video in videos]
+        try:
+            if resolved_format == "json":
+                dest.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+            else:
+                if rows:
+                    fieldnames = list(rows[0].keys())
+                else:
+                    fieldnames = [
+                        "video_id", "title", "channel", "upload_date",
+                        "duration", "duration_seconds", "webpage_url",
+                        "output_path", "has_local_media",
+                        "transcript_segments", "chapters", "playlists",
+                    ]
+                buf = io.StringIO()
+                writer = csv.DictWriter(buf, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows)
+                dest.write_text(buf.getvalue(), encoding="utf-8")
+        except OSError as exc:
+            raise StorageError(f"Could not write export file: {exc}") from exc
+        payload = _mutation_payload(
+            command="export",
+            status="ok",
+            summary={"exported": len(rows), "format": resolved_format},
+            path=str(dest),
+        )
+        mode = _normalize_output_mode(output)
+        if mode == "json":
+            _print_json(payload)
+            return
+        console.print(
+            f"Exported {len(rows)} catalog entries to {sanitize_terminal_text(str(dest))}.",
+            markup=False,
+        )
+
+    _run_guarded(_command, output_mode=output)
+
+
+@app.command(name="import", help="Import catalog entries from a JSON file.")
+def import_catalog(
+    src: Path = typer.Argument(..., help="JSON file previously created by 'yt-agent export'."),
+    dry_run: bool = typer.Option(False, "--dry-run", help=DRY_RUN_HELP),
+    output: str = typer.Option("table", "--output", help=READ_OUTPUT_HELP),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml override."),
+) -> None:
+    """Import catalog entries from a JSON file created by 'yt-agent export'."""
+
+    def _command() -> None:
+        from yt_agent.catalog import VideoUpsert  # lazy to match module-level pattern
+
+        settings = _load_settings(config)
+        if not src.exists():
+            raise InvalidInputError(f"Import file not found: {src}")
+        try:
+            raw = src.read_text(encoding="utf-8")
+            data = json.loads(raw)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise InvalidInputError(f"Could not read import file: {exc}") from exc
+        if not isinstance(data, list):
+            raise InvalidInputError("Import file must contain a top-level JSON array.")
+        indexed_at = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        upserted = 0
+        skipped = 0
+        warnings: list[str] = []
+        if not dry_run:
+            store = _catalog(settings)
+            with operation_lock(_operation_lock_path(settings)):
+                for entry in data:
+                    if not isinstance(entry, dict):
+                        skipped += 1
+                        continue
+                    video_id = str(entry.get("video_id") or "").strip()
+                    if not video_id:
+                        skipped += 1
+                        warnings.append("Skipped entry with missing video_id.")
+                        continue
+                    try:
+                        record = VideoUpsert(
+                            video_id=video_id,
+                            title=str(entry.get("title") or ""),
+                            channel=str(entry.get("channel") or ""),
+                            upload_date=str(entry["upload_date"])
+                            if entry.get("upload_date") and entry["upload_date"] != "undated"
+                            else None,
+                            duration_seconds=int(entry["duration_seconds"])
+                            if entry.get("duration_seconds") is not None
+                            else None,
+                            extractor_key=str(entry.get("extractor_key") or "Youtube"),
+                            webpage_url=str(entry.get("webpage_url") or ""),
+                            requested_input=str(entry["requested_input"])
+                            if entry.get("requested_input")
+                            else None,
+                            source_query=str(entry["source_query"])
+                            if entry.get("source_query")
+                            else None,
+                            output_path=Path(str(entry["output_path"]))
+                            if entry.get("output_path")
+                            else None,
+                            info_json_path=Path(str(entry["info_json_path"]))
+                            if entry.get("info_json_path")
+                            else None,
+                            downloaded_at=str(entry["downloaded_at"])
+                            if entry.get("downloaded_at")
+                            else None,
+                            indexed_at=indexed_at,
+                        )
+                        store.upsert_video(record)
+                        upserted += 1
+                    except (KeyError, TypeError, ValueError) as exc:
+                        skipped += 1
+                        warnings.append(
+                            f"Skipped {sanitize_terminal_text(video_id)}: {exc}"
+                        )
+        else:
+            for entry in data:
+                if not isinstance(entry, dict):
+                    skipped += 1
+                    continue
+                video_id = str(entry.get("video_id") or "").strip()
+                if not video_id:
+                    skipped += 1
+                else:
+                    upserted += 1
+        payload = _mutation_payload(
+            command="import",
+            status="ok",
+            summary={"imported": upserted, "skipped": skipped, "dry_run": dry_run},
+            warnings=warnings,
+        )
+        mode = _normalize_output_mode(output)
+        if mode == "json":
+            _print_json(payload)
+            return
+        prefix = "[dry-run] " if dry_run else ""
+        console.print(
+            f"{prefix}Imported {upserted} catalog entries ({skipped} skipped).",
+            markup=False,
+        )
+
+    _run_guarded(_command, output_mode=output)
 
 
 @app.command(help="Show recent downloads from the manifest.")
