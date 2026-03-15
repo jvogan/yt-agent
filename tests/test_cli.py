@@ -17,6 +17,7 @@ from yt_agent.errors import (
     InvalidInputError,
     SelectionError,
     StateLockError,
+    dependency_install_hint,
 )
 from yt_agent.models import (
     CatalogVideo,
@@ -601,7 +602,7 @@ def test_download_continues_after_single_failure(settings, monkeypatch) -> None:
                 "status": "error",
                 "exit_code": 3,
                 "error_type": "DependencyError",
-                "message": "missing yt-dlp",
+                "message": f"missing yt-dlp. Install it with `{dependency_install_hint('yt-dlp')}` and retry.",
             },
         ),
         (
@@ -641,7 +642,7 @@ def test_download_continues_after_single_failure(settings, monkeypatch) -> None:
                 "status": "error",
                 "exit_code": 6,
                 "error_type": "ExternalCommandError",
-                "message": "boom",
+                "message": "boom. Retry the command. If it keeps failing, try again later.",
                 "stderr": "bad\x1b[31m\nnext",
             },
         ),
@@ -1543,9 +1544,10 @@ def test_cleanup_dry_run_lists_orphans_without_removing(settings, monkeypatch) -
     assert result.exit_code == 0
     assert "Dry run:" in result.stdout
     assert "Cleanup Preview" in result.stdout
-    assert orphan_cache_dir.name in result.stdout
-    assert empty_dir.name in result.stdout
-    assert part_file.name in result.stdout
+    # Check kind labels rather than full paths to avoid Rich fold-truncation on long tmp paths
+    assert "cache_dir" in result.stdout
+    assert "empty_dir" in result.stdout
+    assert "part_file" in result.stdout
     assert orphan_cache_dir.exists()
     assert empty_dir.exists()
     assert part_file.exists()
@@ -1785,7 +1787,7 @@ def test_download_quiet_plain_keeps_failure_details_on_stderr(settings, monkeypa
 
     assert result.exit_code == 6
     assert result.stdout == ""
-    assert "Failed: Demo [abc123def45] yt-dlp download failed. bad next" in result.stderr.replace("\n", " ")
+    assert "Failed: Demo [abc123def45] yt-dlp download failed. Retry the command." in result.stderr.replace("\n", " ")
 
 
 def test_download_json_failure_preserves_raw_stderr(settings, monkeypatch) -> None:
