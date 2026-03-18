@@ -76,6 +76,8 @@ def _chmod(path: Path, mode: int) -> None:
 def ensure_private_directory(path: Path) -> None:
     """Create a private directory for local state on POSIX systems."""
 
+    if path.is_symlink():
+        raise OSError(f"Refusing to operate on symlink: {path}")
     path.mkdir(parents=True, exist_ok=True, mode=POSIX_PRIVATE_DIR_MODE)
     _chmod(path, POSIX_PRIVATE_DIR_MODE)
 
@@ -84,6 +86,8 @@ def ensure_private_file(path: Path) -> None:
     """Create a private file for local state on POSIX systems."""
 
     ensure_private_directory(path.parent)
+    if path.is_symlink():
+        raise OSError(f"Refusing to operate on symlink: {path}")
     path.touch(exist_ok=True)
     _chmod(path, POSIX_PRIVATE_FILE_MODE)
 
@@ -91,10 +95,12 @@ def ensure_private_file(path: Path) -> None:
 def protect_private_tree(path: Path) -> None:
     """Best-effort permission hardening for a local state directory tree."""
 
-    if not path.exists():
+    if not path.exists() or path.is_symlink():
         return
     ensure_private_directory(path)
     for candidate in path.rglob("*"):
+        if candidate.is_symlink():
+            continue
         if candidate.is_dir():
             ensure_private_directory(candidate)
         elif candidate.is_file():

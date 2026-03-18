@@ -99,9 +99,10 @@ class YtAgentTui(App[None]):
     selected_video_id: reactive[str | None] = reactive(None)
     filter_text: reactive[str] = reactive("")
 
-    def __init__(self, catalog: CatalogLike) -> None:
+    def __init__(self, catalog: CatalogLike, *, download_root: Path | None = None) -> None:
         super().__init__()
         self.catalog = catalog
+        self._download_root = download_root
         self._source_items: list[SourceItem] = []
         self._source_videos: list[CatalogVideo] = []
         self._videos: list[CatalogVideo] = []
@@ -274,6 +275,12 @@ class YtAgentTui(App[None]):
         if not path.exists():
             self.notify("Local media path is missing on disk.", severity="warning")
             return
+        if self._download_root is not None:
+            try:
+                path.resolve().relative_to(self._download_root.resolve())
+            except ValueError:
+                self.notify("Media path is outside the download root.", severity="warning")
+                return
         if not open_with_system_default(path):
             self.notify(
                 "Opening local media is only supported on macOS, Linux, and Windows.",
@@ -300,7 +307,7 @@ class YtAgentTui(App[None]):
 
 def launch_tui(settings: Settings) -> None:
     store = CatalogStore(settings.catalog_file)
-    app = YtAgentTui(store)
+    app = YtAgentTui(store, download_root=settings.download_root)
     app.run()
 
 

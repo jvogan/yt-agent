@@ -643,7 +643,7 @@ def test_download_continues_after_single_failure(settings, monkeypatch) -> None:
                 "exit_code": 6,
                 "error_type": "ExternalCommandError",
                 "message": "boom. Retry the command. If it keeps failing, try again later.",
-                "stderr": "bad\x1b[31m\nnext",
+                "stderr": "bad next",
             },
         ),
         (
@@ -1790,7 +1790,7 @@ def test_download_quiet_plain_keeps_failure_details_on_stderr(settings, monkeypa
     assert "Failed: Demo [abc123def45] yt-dlp download failed. Retry the command." in result.stderr.replace("\n", " ")
 
 
-def test_download_json_failure_preserves_raw_stderr(settings, monkeypatch) -> None:
+def test_download_json_failure_sanitizes_stderr(settings, monkeypatch) -> None:
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
     monkeypatch.setattr(
         "yt_agent.cli._resolve_download_inputs",
@@ -1808,7 +1808,7 @@ def test_download_json_failure_preserves_raw_stderr(settings, monkeypatch) -> No
     assert result.exit_code == 6
     payload = json.loads(result.stdout)
     assert payload["status"] == "error"
-    assert payload["errors"][0]["stderr"] == "bad\x1b[31m\nnext"
+    assert payload["errors"][0]["stderr"] == "bad next"
 
 
 def test_download_json_requires_select_for_select_playlist(settings, monkeypatch) -> None:

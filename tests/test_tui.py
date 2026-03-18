@@ -457,13 +457,13 @@ def test_launch_tui_constructs_catalog_store_and_runs_app(monkeypatch: pytest.Mo
             created["catalog_file"] = catalog_file
 
     class FakeApp:
-        def __init__(self, store: Any) -> None:
+        def __init__(self, store: Any, *, download_root: Any = None) -> None:
             created["store"] = store
 
         def run(self) -> None:
             created["ran"] = True
 
-    settings = SimpleNamespace(catalog_file=tmp_path / "catalog.sqlite")
+    settings = SimpleNamespace(catalog_file=tmp_path / "catalog.sqlite", download_root=tmp_path)
     monkeypatch.setattr("yt_agent.tui.CatalogStore", FakeStore)
     monkeypatch.setattr("yt_agent.tui.YtAgentTui", FakeApp)
 

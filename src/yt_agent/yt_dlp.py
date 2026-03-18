@@ -19,6 +19,8 @@ from yt_agent.errors import DependencyError, ExternalCommandError, InvalidInputE
 from yt_agent.library import build_output_template, discover_info_json
 from yt_agent.models import DownloadTarget, VideoInfo
 
+_URL_RE = re.compile(r"https?://\S+")
+
 __all__ = [
     "YOUTUBE_ID_RE",
     "ALLOWED_YOUTUBE_HOSTS",
@@ -48,6 +50,10 @@ ALLOWED_YOUTUBE_HOSTS = {
     "www.youtube-nocookie.com",
 }
 logger = logging.getLogger("yt_agent")
+
+# Finding 1: Allowlists for config values passed to yt-dlp CLI arguments.
+_FORMAT_ALLOWLIST_RE = re.compile(r"^[A-Za-z0-9+*/\[\],._()\- ]+$")
+_SUBTITLE_LANG_RE = re.compile(r"^[A-Za-z0-9,.*\- ]+$")
 
 
 @dataclass(frozen=True)
@@ -97,10 +103,15 @@ def normalize_target(value: str) -> str:
     raise InvalidInputError("Target must be a full URL or an 11-character YouTube video id.")
 
 
+def _redact_command(command: str) -> str:
+    """Strip URLs and search queries from debug log lines."""
+    return _URL_RE.sub("<url>", command)
+
+
 def _run_json(args: list[str]) -> dict[str, Any]:
     command = shlex.join(args)
     start_time = time.perf_counter()
-    logger.debug("Running subprocess: %s", command)
+    logger.debug("Running subprocess: %s", _redact_command(command))
     try:
         # Uses a resolved yt-dlp path and normalized arguments without invoking a shell.
         completed = subprocess.run(  # noqa: S603
@@ -108,14 +119,14 @@ def _run_json(args: list[str]) -> dict[str, Any]:
         )
     except subprocess.TimeoutExpired as exc:
         elapsed_ms = (time.perf_counter() - start_time) * 1000
-        logger.debug("Subprocess timed out after %.2fms: %s", elapsed_ms, command)
+        logger.debug("Subprocess timed out after %.2fms", elapsed_ms)
         raise ExternalCommandError("yt-dlp timed out.") from exc
     elapsed_ms = (time.perf_counter() - start_time) * 1000
     logger.debug(
         "Subprocess completed returncode=%s elapsed_ms=%.2f command=%s",
         completed.returncode,
         elapsed_ms,
-        command,
+        _redact_command(command),
     )
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
@@ -130,7 +141,7 @@ def _run_json(args: list[str]) -> dict[str, Any]:
 def _run_download(args: list[str]) -> DownloadExecution | None:
     command = shlex.join(args)
     start_time = time.perf_counter()
-    logger.debug("Running subprocess: %s", command)
+    logger.debug("Running subprocess: %s", _redact_command(command))
     try:
         # Uses a resolved yt-dlp path and normalized arguments without invoking a shell.
         completed = subprocess.run(  # noqa: S603
@@ -138,14 +149,14 @@ def _run_download(args: list[str]) -> DownloadExecution | None:
         )
     except subprocess.TimeoutExpired as exc:
         elapsed_ms = (time.perf_counter() - start_time) * 1000
-        logger.debug("Subprocess timed out after %.2fms: %s", elapsed_ms, command)
+        logger.debug("Subprocess timed out after %.2fms", elapsed_ms)
         raise ExternalCommandError("yt-dlp timed out.") from exc
     elapsed_ms = (time.perf_counter() - start_time) * 1000
     logger.debug(
         "Subprocess completed returncode=%s elapsed_ms=%.2f command=%s",
         completed.returncode,
         elapsed_ms,
-        command,
+        _redact_command(command),
     )
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
@@ -153,7 +164,7 @@ def _run_download(args: list[str]) -> DownloadExecution | None:
 
     lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
     output_path = next(
-        (Path(line) for line in reversed(lines) if not line.startswith("[debug]")), None
+        (Path(line) for line in reversed(lines) if not line.startswith("[")), None
     )
     if output_path is None:
         return None  # yt-dlp exited 0 with no output — archive skip
@@ -161,6 +172,8 @@ def _run_download(args: list[str]) -> DownloadExecution | None:
 
 
 def search(query: str, *, limit: int) -> list[VideoInfo]:
+    if "://" in query:
+        raise InvalidInputError("Search query must not contain a URL.")
     yt_dlp = command_path()
     payload = _run_json([yt_dlp, "--dump-single-json", "--no-warnings", f"ytsearch{limit}:{query}"])
     entries = payload.get("entries") or []
@@ -226,6 +239,15 @@ def download_target(
     auto_subs: bool = False,
 ) -> DownloadExecution | None:
     yt_dlp = command_path()
+
+    # Validate config-sourced values before passing to yt-dlp CLI.
+    format_value = settings.audio_format if mode == "audio" else settings.video_format
+    if not _FORMAT_ALLOWLIST_RE.fullmatch(format_value):
+        label = "audio_format" if mode == "audio" else "video_format"
+        raise InvalidInputError(f"Invalid characters in {label}.")
+    if fetch_subs and not _SUBTITLE_LANG_RE.fullmatch(settings.subtitle_languages):
+        raise InvalidInputError("Invalid characters in subtitle_languages.")
+
     output_template = build_output_template(settings.download_root, target.info)
     args = [
         yt_dlp,
@@ -238,7 +260,7 @@ def download_target(
         "--download-archive",
         str(settings.archive_file),
         "--format",
-        settings.audio_format if mode == "audio" else settings.video_format,
+        format_value,
     ]
 
     if mode == "audio":
@@ -265,6 +287,15 @@ def download_target(
     execution = _run_download(args)
     if execution is None:
         return None
+
+    # Verify the output path is within the expected download root.
+    try:
+        execution.output_path.resolve().relative_to(settings.download_root.resolve())
+    except ValueError as exc:
+        raise InvalidInputError(
+            "Download output path is outside the download root directory."
+        ) from exc
+
     return DownloadExecution(
         output_path=execution.output_path,
         stdout=execution.stdout,

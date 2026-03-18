@@ -64,7 +64,7 @@ def _json_error_payload(
         "message": message,
     }
     if stderr:
-        payload["stderr"] = stderr
+        payload["stderr"] = sanitize_terminal_text(stderr)
     return payload
 
 
@@ -130,7 +130,7 @@ def _download_operation_item_payload(item: DownloadOperationItem) -> dict[str, A
     if item.error_message:
         payload["error_message"] = item.error_message
     if item.stderr:
-        payload["stderr"] = item.stderr
+        payload["stderr"] = sanitize_terminal_text(item.stderr)
     return payload
 
 
@@ -595,7 +595,7 @@ def _download_operation_payload(
             "video_id": item.info.video_id,
             "title": item.info.title,
             "message": item.error_message or "download failed",
-            "stderr": item.stderr or "",
+            "stderr": sanitize_terminal_text(item.stderr or ""),
         }
         for item in items
         if item.status == "failed"

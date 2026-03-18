@@ -223,8 +223,8 @@ def _language_match_clause(language: str) -> tuple[str, str]:
     # Support the wildcard styles we document publicly:
     # - SQL LIKE prefixes such as en%
     # - glob / regex-ish forms such as en* and en.*
-    pattern = raw.replace(".*", "%").replace("*", "%").replace("?", "_")
-    if "%" in pattern or "_" in pattern:
+    pattern = raw.replace(".*", "%").replace("*", "%")
+    if "%" in pattern:
         return "LIKE", pattern
     return "=", raw
 
@@ -260,7 +260,8 @@ class CatalogStore:
 
     @staticmethod
     def _trace_sql(statement: str) -> None:
-        logger.debug("SQL: %s", statement)
+        redacted = re.sub(r"'[^']{20,}'", "'<redacted>'", statement)
+        logger.debug("SQL: %s", redacted)
 
     def ensure_schema(self) -> None:
         with self.connect() as conn:
@@ -1017,11 +1018,16 @@ class CatalogStore:
         return None
 
     def delete_video(self, video_id: str) -> bool:
+        if not video_id or "/" in video_id or "\\" in video_id or video_id in (".", ".."):
+            return False
+        cache_dir = (self.path.parent / "subtitle-cache" / video_id).resolve()
+        safe_root = (self.path.parent / "subtitle-cache").resolve()
         with self.connect() as conn:
             conn.execute("DELETE FROM chapter_fts WHERE video_id = ?", (video_id,))
             conn.execute("DELETE FROM transcript_fts WHERE video_id = ?", (video_id,))
             cursor = conn.execute("DELETE FROM videos WHERE video_id = ?", (video_id,))
-        shutil.rmtree(self.path.parent / "subtitle-cache" / video_id, ignore_errors=True)
+        if cache_dir != safe_root and cache_dir.is_relative_to(safe_root):
+            shutil.rmtree(cache_dir, ignore_errors=True)
         return cursor.rowcount > 0
 
     def clear(self) -> None:
