@@ -18,6 +18,7 @@ from yt_agent.config import Settings
 from yt_agent.errors import DependencyError, ExternalCommandError, InvalidInputError
 from yt_agent.library import build_output_template, discover_info_json
 from yt_agent.models import DownloadTarget, VideoInfo
+from yt_agent.security import protect_private_tree
 
 _URL_RE = re.compile(r"https?://\S+")
 
@@ -295,6 +296,7 @@ def download_target(
         raise InvalidInputError(
             "Download output path is outside the download root directory."
         ) from exc
+    protect_private_tree(execution.output_path.parent)
 
     return DownloadExecution(
         output_path=execution.output_path,

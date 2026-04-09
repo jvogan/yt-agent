@@ -8,10 +8,14 @@ __pycache__/
 build/
 dist/
 .DS_Store
+.coverage
+.coverage.*
 coverage.xml
 htmlcov/
 output/
 tmp/
+.tmp-uv-cache/
+.uv-cache/
 assets/tmp/
 .env
 .env.*

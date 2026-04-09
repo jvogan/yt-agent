@@ -67,7 +67,7 @@ jobs:
       - name: Hygiene
         shell: bash
         run: |
-          blocked_files="$(git ls-files | grep -E '(^|/)\.env(\..+)?$|(^|/)cookies[^/]*\.txt$|\.sqlite3?$|\.db$|\.jsonl$' || true)"
+          blocked_files="$(git ls-files | grep -E '(^|/)\.env(\..+)?$|(^|/)cookies[^/]*\.txt$|(^|/)\.coverage(\..+)?$|(^|/)\.tmp-uv-cache(/|$)|(^|/)\.uv-cache(/|$)|\.sqlite3?$|\.db$|\.jsonl$' || true)"
           if [ -n "$blocked_files" ]; then
             echo "Tracked files must not include local state or secret-looking artifacts:"
             echo "$blocked_files"

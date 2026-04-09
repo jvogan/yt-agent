@@ -274,6 +274,39 @@ def test_extract_resolved_clip_prefers_remote_when_requested(settings, monkeypat
     ]
 
 
+def test_extract_resolved_clip_rehardens_clip_directory(settings, monkeypatch, tmp_path: Path) -> None:
+    media_path = tmp_path / "source.mkv"
+    media_path.write_bytes(b"video")
+    created_dirs: list[Path] = []
+    protected: list[Path] = []
+
+    def fake_ensure_private_directory(path: Path) -> None:
+        created_dirs.append(path)
+        path.mkdir(parents=True, exist_ok=True)
+
+    def fake_run(args: list[str], message: str) -> None:
+        Path(args[-1]).write_bytes(b"clip")
+
+    monkeypatch.setattr("yt_agent.clips.ensure_private_directory", fake_ensure_private_directory)
+    monkeypatch.setattr("yt_agent.clips.protect_private_tree", lambda path: protected.append(path))
+    monkeypatch.setattr("yt_agent.clips._ffmpeg_path", lambda: "/usr/local/bin/ffmpeg")
+    monkeypatch.setattr("yt_agent.clips._run", fake_run)
+
+    extraction = _extract_resolved_clip(
+        settings,
+        _video_info(),
+        media_path=media_path,
+        label="segment",
+        start_seconds=3.25,
+        end_seconds=7.5,
+        mode="fast",
+        prefer_remote=False,
+    )
+
+    assert created_dirs == [extraction.output_path.parent]
+    assert protected == [extraction.output_path.parent]
+
+
 def test_extract_resolved_clip_requires_opt_in_for_remote_fallback(settings, monkeypatch) -> None:
     monkeypatch.setattr("yt_agent.clips.command_path", lambda: "/usr/local/bin/yt-dlp")
     monkeypatch.setattr("yt_agent.clips._run", lambda args, message: None)

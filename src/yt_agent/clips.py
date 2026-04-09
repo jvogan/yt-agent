@@ -11,6 +11,7 @@ from yt_agent.config import Settings
 from yt_agent.errors import DependencyError, ExternalCommandError, InvalidInputError
 from yt_agent.library import build_clip_output_path
 from yt_agent.models import ClipSearchHit, VideoInfo
+from yt_agent.security import ensure_private_directory, protect_private_tree
 from yt_agent.yt_dlp import command_path, optional_tool_path
 
 __all__ = [
@@ -150,7 +151,7 @@ def _extract_resolved_clip(
         prefer_remote=prefer_remote,
     )
     output_path = plan.output_path
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_private_directory(output_path.parent)
 
     if plan.source == "local":
         ffmpeg = _ffmpeg_path()
@@ -174,6 +175,7 @@ def _extract_resolved_clip(
             args.extend(["-c:v", "libx264", "-c:a", "aac", "-movflags", "+faststart"])
         args.append(str(output_path))
         _run(args, "ffmpeg clip extraction failed.")
+        protect_private_tree(output_path.parent)
         return ClipExtraction(
             output_path=output_path,
             source="local",
@@ -196,6 +198,7 @@ def _extract_resolved_clip(
         info.webpage_url,
     ]
     _run(args, "yt-dlp remote clip extraction failed.")
+    protect_private_tree(output_path.parent)
     remote_output = next(
         iter(sorted(output_path.parent.glob(f"{output_path.stem}.*"))), output_path
     )

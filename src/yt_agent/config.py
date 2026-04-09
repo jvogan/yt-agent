@@ -187,11 +187,11 @@ class Settings:
     embed_thumbnail: bool = False
 
     def ensure_storage_paths(self) -> None:
-        self.download_root.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(self.download_root)
         ensure_private_directory(self.archive_file.parent)
         ensure_private_directory(self.manifest_file.parent)
         ensure_private_directory(self.catalog_file.parent)
-        self.clips_root.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(self.clips_root)
         ensure_private_directory(self.config_path.parent)
 
 

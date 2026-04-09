@@ -8,6 +8,7 @@ import pytest
 
 from yt_agent.archive import ensure_archive_file
 from yt_agent.catalog import CatalogStore
+from yt_agent.config import Settings
 from yt_agent.errors import StateLockError
 from yt_agent.manifest import ensure_manifest_file
 from yt_agent.security import (
@@ -48,6 +49,23 @@ def test_catalog_and_state_files_are_private(tmp_path: Path) -> None:
     assert stat.S_IMODE(archive_path.stat().st_mode) == 0o600
     assert stat.S_IMODE(manifest_path.stat().st_mode) == 0o600
     assert stat.S_IMODE(catalog_path.stat().st_mode) == 0o600
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission modes only")
+def test_settings_ensure_storage_paths_protects_media_roots(tmp_path: Path) -> None:
+    settings = Settings(
+        config_path=tmp_path / "config" / "config.toml",
+        download_root=tmp_path / "downloads",
+        archive_file=tmp_path / "state" / "archive.txt",
+        manifest_file=tmp_path / "state" / "downloads.jsonl",
+        catalog_file=tmp_path / "state" / "catalog.sqlite",
+        clips_root=tmp_path / "downloads" / "_clips",
+    )
+
+    settings.ensure_storage_paths()
+
+    assert stat.S_IMODE(settings.download_root.stat().st_mode) == 0o700
+    assert stat.S_IMODE(settings.clips_root.stat().st_mode) == 0o700
 
 
 def test_sanitize_terminal_text_strips_control_sequences() -> None:

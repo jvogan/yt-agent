@@ -274,3 +274,23 @@ def test_download_target_no_subtitle_flags_by_default(monkeypatch, tmp_path) -> 
     assert "--write-subs" not in args
     assert "--write-auto-subs" not in args
     assert "--sub-langs" not in args
+
+
+def test_download_target_rehardens_download_directory(monkeypatch, tmp_path) -> None:
+    settings = _make_settings(tmp_path)
+    protected: list[object] = []
+    output_path = settings.download_root / "Channel" / "Demo.mp4"
+
+    def fake_run(args, text, capture_output, check, **kwargs):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"video")
+        return subprocess.CompletedProcess(args, 0, stdout=f"{output_path}\n", stderr="")
+
+    monkeypatch.setattr("yt_agent.yt_dlp.shutil.which", lambda _: "/opt/homebrew/bin/yt-dlp")
+    monkeypatch.setattr("yt_agent.yt_dlp.subprocess.run", fake_run)
+    monkeypatch.setattr("yt_agent.yt_dlp.protect_private_tree", lambda path: protected.append(path))
+
+    result = download_target(_make_target(), settings)
+
+    assert result is not None
+    assert protected == [output_path.parent]
