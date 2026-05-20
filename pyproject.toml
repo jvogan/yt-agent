@@ -1,0 +1,110 @@
+[project]
+name = "yt-agent"
+version = "0.3.0"
+description = "Terminal-first YouTube search, download, catalog, and clip tooling built on yt-dlp."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+keywords = ["youtube", "cli", "yt-dlp", "clips", "transcripts", "textual"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Multimedia :: Video",
+  "Topic :: Utilities",
+]
+dependencies = [
+  "rich>=15.0.0",
+  "textual>=8.2.6",
+  "typer>=0.25.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/jvogan/yt-agent"
+Repository = "https://github.com/jvogan/yt-agent"
+Issues = "https://github.com/jvogan/yt-agent/issues"
+Documentation = "https://github.com/jvogan/yt-agent/tree/main/docs"
+Changelog = "https://github.com/jvogan/yt-agent/blob/main/CHANGELOG.md"
+
+[project.scripts]
+yt-agent = "yt_agent.cli:main"
+
+[dependency-groups]
+dev = [
+  "hypothesis>=6.152.7",
+  "mypy>=2.1.0",
+  "pytest-asyncio>=1.3.0",
+  "pytest-cov>=7.1.0",
+  "pytest>=9.0.3",
+  "ruff>=0.15.13",
+]
+
+[build-system]
+requires = ["hatchling>=1.29,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/yt_agent"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+  "/.coverage*",
+  "/.tmp-uv-cache",
+  "/.tmp-uv-cache/**",
+  "/.uv-cache",
+  "/.uv-cache/**",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = [
+  "slow: tests that take longer than five seconds to finish",
+  "integration: tests that require a real yt-dlp binary",
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+files = ["src/yt_agent"]
+
+[[tool.mypy.overrides]]
+module = ["textual.*"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["yt_agent"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+exclude_lines = [
+  "pragma: no cover",
+  "if __name__",
+  "if TYPE_CHECKING",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "S", "UP", "I", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["E501", "S101", "S108"]
+"scripts/**/*.py" = ["S603", "S607"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["typer.Argument", "typer.Option"]

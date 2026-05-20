@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "codex/**"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="8.30.0"
+          arch="$(uname -m)"
+          case "$arch" in
+            x86_64)
+              asset="gitleaks_${version}_linux_x64.tar.gz"
+              checksum="79a3ab579b53f71efd634f3aaf7e04a0fa0cf206b7ed434638d1547a2470a66e"
+              ;;
+            aarch64|arm64)
+              asset="gitleaks_${version}_linux_arm64.tar.gz"
+              checksum="b4cbbb6ddf7d1b2a603088cd03a4e3f7ce48ee7fd449b51f7de6ee2906f5fa2f"
+              ;;
+            *)
+              echo "Unsupported runner architecture: $arch"
+              exit 1
+              ;;
+          esac
+
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSLo "$RUNNER_TEMP/$asset" "https://github.com/gitleaks/gitleaks/releases/download/v${version}/$asset"
+          echo "${checksum}  $RUNNER_TEMP/$asset" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$asset" -C "$RUNNER_TEMP"
+          install -m 0755 "$RUNNER_TEMP/gitleaks" "$RUNNER_TEMP/bin/gitleaks"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Gitleaks
+        run: gitleaks git . --no-banner --redact
+
+  test:
+    name: Test (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Hygiene
+        shell: bash
+        run: |
+          blocked_files="$(git ls-files | grep -E '(^|/)\.env(\..+)?$|(^|/)cookies[^/]*\.txt$|(^|/)\.coverage(\..+)?$|(^|/)\.tmp-uv-cache(/|$)|(^|/)\.uv-cache(/|$)|\.sqlite3?$|\.db$|\.jsonl$' || true)"
+          if [ -n "$blocked_files" ]; then
+            echo "Tracked files must not include local state or secret-looking artifacts:"
+            echo "$blocked_files"
+            exit 1
+          fi
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@e06108dd0aef18192324c70427afc47652e63a82 # v7.5.0
+      - name: Sync
+        run: uv sync --dev
+      - name: Lint
+        run: uv run ruff check .
+      - name: Type check
+        run: uv run mypy
+      - name: Test
+        run: uv run pytest --cov --cov-report=term-missing
+      - name: CLI Smoke
+        run: |
+          uv run yt-agent --version
+          uv run yt-agent --help
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+      - name: Install uv
+        uses: astral-sh/setup-uv@e06108dd0aef18192324c70427afc47652e63a82 # v7.5.0
+      - name: Build distributions
+        run: uv build
+      - name: Check distributions
+        run: uv run --with twine twine check dist/*
+      - name: Install smoke
+        run: |
+          uv tool run --from . yt-agent --help

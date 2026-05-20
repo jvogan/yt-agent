@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest an improvement to yt-agent
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Workflow problem
+      description: Describe the user workflow that is awkward or unsupported today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: automation
+    attributes:
+      label: Human or agent use
+      description: Explain whether this is mainly for direct terminal use, coding-agent use, or both.
