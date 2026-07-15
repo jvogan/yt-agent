@@ -85,6 +85,7 @@ class FakeCatalog:
     details: dict[str, dict[str, Any] | None] = field(default_factory=dict)
     initialize_calls: int = 0
     list_video_calls: list[dict[str, Any]] = field(default_factory=list)
+    search_video_calls: list[dict[str, Any]] = field(default_factory=list)
 
     def initialize(self) -> None:
         self.initialize_calls += 1
@@ -103,6 +104,7 @@ class FakeCatalog:
         has_transcript: bool | None = None,
         has_chapters: bool | None = None,
         limit: int = 50,
+        offset: int = 0,
     ) -> list[CatalogVideo]:
         self.list_video_calls.append(
             {
@@ -111,13 +113,50 @@ class FakeCatalog:
                 "has_transcript": has_transcript,
                 "has_chapters": has_chapters,
                 "limit": limit,
+                "offset": offset,
             }
         )
         if channel is not None:
-            return list(self.channel_videos.get(channel, []))
-        if playlist_id is not None:
-            return list(self.playlist_videos.get(playlist_id, []))
-        return list(self.all_videos)
+            rows = self.channel_videos.get(channel, [])
+        elif playlist_id is not None:
+            rows = self.playlist_videos.get(playlist_id, [])
+        else:
+            rows = self.all_videos
+        return list(rows[offset : offset + limit])
+
+    def search_videos(
+        self,
+        query: str,
+        *,
+        channel: str | None = None,
+        playlist_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[CatalogVideo]:
+        self.search_video_calls.append(
+            {
+                "query": query,
+                "channel": channel,
+                "playlist_id": playlist_id,
+                "limit": limit,
+                "offset": offset,
+            }
+        )
+        if channel is not None:
+            rows = self.channel_videos.get(channel, [])
+        elif playlist_id is not None:
+            rows = self.playlist_videos.get(playlist_id, [])
+        else:
+            rows = self.all_videos
+        normalized = query.casefold()
+        matches = [
+            video
+            for video in rows
+            if normalized in video.title.casefold()
+            or normalized in video.channel.casefold()
+            or normalized in video.video_id.casefold()
+        ]
+        return list(matches[offset : offset + limit])
 
     def get_video_details(self, video_id: str) -> dict[str, Any] | None:
         return self.details.get(video_id)
@@ -186,6 +225,7 @@ class TuiHarness:
     table: FakeDataTable
     details: FakeStatic
     notifications: list[tuple[str, str | None]]
+    copied: list[str]
 
 
 def make_harness(catalog: FakeCatalog) -> TuiHarness:
@@ -195,6 +235,7 @@ def make_harness(catalog: FakeCatalog) -> TuiHarness:
     table = FakeDataTable()
     details = FakeStatic()
     notifications: list[tuple[str, str | None]] = []
+    copied: list[str] = []
     widgets = {"#filter": filter_input, "#sources": list_view, "#videos": table, "#details": details}
 
     def fake_query_one(selector: str, expected_type: Any) -> Any:
@@ -202,6 +243,7 @@ def make_harness(catalog: FakeCatalog) -> TuiHarness:
 
     app.query_one = fake_query_one  # type: ignore[method-assign]
     app.notify = lambda message, severity=None: notifications.append((message, severity))  # type: ignore[method-assign]
+    app.copy_to_clipboard = lambda value: copied.append(value)  # type: ignore[method-assign]
     return TuiHarness(
         app=app,
         filter_input=filter_input,
@@ -209,6 +251,7 @@ def make_harness(catalog: FakeCatalog) -> TuiHarness:
         table=table,
         details=details,
         notifications=notifications,
+        copied=copied,
     )
 
 
@@ -256,9 +299,9 @@ def test_load_videos_for_each_source_kind_uses_expected_filters() -> None:
     assert harness.app._load_videos_for_source(SourceItem("playlist", "Playlist One", "PL123"))[0].video_id == "playlist-video"
     assert harness.app._load_videos_for_source(SourceItem("all", "All Videos"))[0].video_id == "all-video"
     assert catalog.list_video_calls == [
-        {"channel": "Alpha", "playlist_id": None, "has_transcript": None, "has_chapters": None, "limit": 100},
-        {"channel": None, "playlist_id": "PL123", "has_transcript": None, "has_chapters": None, "limit": 100},
-        {"channel": None, "playlist_id": None, "has_transcript": None, "has_chapters": None, "limit": 100},
+        {"channel": "Alpha", "playlist_id": None, "has_transcript": None, "has_chapters": None, "limit": 51, "offset": 0},
+        {"channel": None, "playlist_id": "PL123", "has_transcript": None, "has_chapters": None, "limit": 51, "offset": 0},
+        {"channel": None, "playlist_id": None, "has_transcript": None, "has_chapters": None, "limit": 51, "offset": 0},
     ]
 
 
@@ -273,16 +316,27 @@ def test_apply_source_sets_empty_state_when_catalog_has_no_results() -> None:
     assert harness.details.content == "No videos found for this source."
 
 
-def test_apply_source_renders_large_result_sets_and_selects_first_video() -> None:
+def test_apply_source_paginates_large_result_sets_and_selects_first_video() -> None:
     videos = [make_video(f"video-{index:03d}") for index in range(120)]
     catalog = FakeCatalog(all_videos=videos, details={videos[0].video_id: make_details(videos[0])})
     harness = make_harness(catalog)
 
     harness.app._apply_source(SourceItem("all", "All Videos"))
 
-    assert harness.table.row_count == 120
+    assert harness.table.row_count == 50
     assert harness.table.row_keys[0] == "video-000"
     assert harness.app.selected_video_id == "video-000"
+
+    harness.app.action_next_page()
+    assert harness.table.row_count == 50
+    assert harness.table.row_keys[0] == "video-050"
+    harness.app.action_next_page()
+    assert harness.table.row_count == 20
+    assert harness.table.row_keys[0] == "video-100"
+    harness.app.action_next_page()
+    assert harness.notifications[-1] == ("Already on the last page.", None)
+    harness.app.action_previous_page()
+    assert harness.table.row_keys[0] == "video-050"
 
 
 def test_input_filter_matches_title_and_channel_case_insensitively_and_clears() -> None:
@@ -307,6 +361,7 @@ def test_input_filter_matches_title_and_channel_case_insensitively_and_clears() 
 
     assert harness.table.row_keys == ["video-2"]
     assert harness.app.selected_video_id == "video-2"
+    assert catalog.search_video_calls[-1]["query"] == "bEtA"
 
     harness.filter_input.value = "alpha"
     harness.app.on_input_changed(SimpleNamespace(input=harness.filter_input, value=harness.filter_input.value))
@@ -420,7 +475,17 @@ def test_action_open_media_reports_expected_status(
 
 
 def test_clip_and_download_actions_require_selection() -> None:
+    class FakeQueue:
+        def ensure_schema(self) -> None:
+            return None
+
+        def add(self, operation, target, **kwargs):
+            assert operation == "download"
+            assert target == "abc123def45"
+            return SimpleNamespace(job_id=7)
+
     harness = make_harness(FakeCatalog())
+    harness.app._queue = FakeQueue()
 
     harness.app.action_clip_action()
     harness.app.action_download_action()
@@ -431,9 +496,10 @@ def test_clip_and_download_actions_require_selection() -> None:
     assert harness.notifications == [
         ("No video selected.", "warning"),
         ("No video selected.", "warning"),
-        ("Run: yt-agent clips search --source transcript 'query'  (video abc123def45)", None),
-        ("Run: yt-agent download abc123def45", None),
+        ("Copied video ID abc123def45 for clip search.", None),
+        ("Queued download job 7 for abc123def45.", None),
     ]
+    assert harness.copied == ["abc123def45"]
 
 
 def test_clip_and_download_actions_sanitize_selected_video_id() -> None:
@@ -444,9 +510,10 @@ def test_clip_and_download_actions_sanitize_selected_video_id() -> None:
     harness.app.action_download_action()
 
     assert harness.notifications == [
-        ("Run: yt-agent clips search --source transcript 'query'  (video abc123 def45)", None),
-        ("Run: yt-agent download abc123 def45", None),
+        ("Copied video ID abc123 def45 for clip search.", None),
+        ("Download queue is unavailable.", "warning"),
     ]
+    assert harness.copied == ["abc123 def45"]
 
 
 def test_launch_tui_constructs_catalog_store_and_runs_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -457,8 +524,9 @@ def test_launch_tui_constructs_catalog_store_and_runs_app(monkeypatch: pytest.Mo
             created["catalog_file"] = catalog_file
 
     class FakeApp:
-        def __init__(self, store: Any, *, download_root: Any = None) -> None:
+        def __init__(self, store: Any, *, download_root: Any = None, queue: Any = None) -> None:
             created["store"] = store
+            created["queue"] = queue
 
         def run(self) -> None:
             created["ran"] = True
@@ -472,6 +540,7 @@ def test_launch_tui_constructs_catalog_store_and_runs_app(monkeypatch: pytest.Mo
     assert created == {
         "catalog_file": settings.catalog_file,
         "store": created["store"],
+        "queue": created["queue"],
         "ran": True,
     }
     assert isinstance(created["store"], FakeStore)

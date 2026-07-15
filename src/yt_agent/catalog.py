@@ -9,7 +9,8 @@ import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypedDict
+from types import TracebackType
+from typing import Any, Literal, TypedDict
 from urllib.parse import quote
 
 from yt_agent.models import (
@@ -23,6 +24,7 @@ from yt_agent.security import ensure_private_file
 
 __all__ = [
     "SCHEMA",
+    "CATALOG_SCHEMA_VERSION",
     "TRANSCRIPT_EXISTS_CLAUSE",
     "TRANSCRIPT_MISSING_CLAUSE",
     "CHAPTER_EXISTS_CLAUSE",
@@ -30,12 +32,28 @@ __all__ = [
     "VIDEO_ORDER_BY",
     "VideoUpsert",
     "PlaylistUpsert",
+    "CommentUpsert",
     "VideoDetails",
     "CatalogStore",
 ]
 
 
 logger = logging.getLogger("yt_agent")
+
+
+class _ClosingConnection(sqlite3.Connection):
+    """Commit or roll back a context block, then release the SQLite handle."""
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> Literal[False]:
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -118,7 +136,103 @@ CREATE VIRTUAL TABLE IF NOT EXISTS transcript_fts USING fts5(
     segment_id UNINDEXED,
     text
 );
+
+CREATE TABLE IF NOT EXISTS comments (
+    comment_id TEXT PRIMARY KEY,
+    video_id TEXT NOT NULL REFERENCES videos(video_id) ON DELETE CASCADE,
+    author TEXT NOT NULL,
+    text TEXT NOT NULL,
+    published_at TEXT,
+    like_count INTEGER NOT NULL DEFAULT 0,
+    parent_id TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_comments_video_id ON comments(video_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS comment_fts USING fts5(
+    video_id UNINDEXED,
+    comment_id UNINDEXED,
+    text
+);
 """
+
+# SQLite catalogs created before explicit migration tracking have user_version
+# 0. Migration 1 is deliberately the existing idempotent schema, so both fresh
+# catalogs and those legacy databases take the same safe upgrade path.
+CURATION_SCHEMA = """
+-- Comments were introduced while legacy catalogs still reported version 1;
+-- repeat their idempotent DDL here so those catalogs are repaired on upgrade.
+CREATE TABLE IF NOT EXISTS comments (
+    comment_id TEXT PRIMARY KEY,
+    video_id TEXT NOT NULL REFERENCES videos(video_id) ON DELETE CASCADE,
+    author TEXT NOT NULL,
+    text TEXT NOT NULL,
+    published_at TEXT,
+    like_count INTEGER NOT NULL DEFAULT 0,
+    parent_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_comments_video_id ON comments(video_id);
+CREATE VIRTUAL TABLE IF NOT EXISTS comment_fts USING fts5(
+    video_id UNINDEXED, comment_id UNINDEXED, text
+);
+CREATE TABLE IF NOT EXISTS video_curation (
+    video_id TEXT PRIMARY KEY REFERENCES videos(video_id) ON DELETE CASCADE,
+    note TEXT NOT NULL DEFAULT '',
+    rating INTEGER CHECK(rating BETWEEN 1 AND 5),
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tags (
+    tag_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE
+);
+CREATE TABLE IF NOT EXISTS video_tags (
+    video_id TEXT NOT NULL REFERENCES videos(video_id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES tags(tag_id) ON DELETE CASCADE,
+    PRIMARY KEY (video_id, tag_id)
+);
+CREATE TABLE IF NOT EXISTS collections (
+    collection_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    description TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS collection_videos (
+    collection_id INTEGER NOT NULL REFERENCES collections(collection_id) ON DELETE CASCADE,
+    video_id TEXT NOT NULL REFERENCES videos(video_id) ON DELETE CASCADE,
+    position INTEGER,
+    PRIMARY KEY (collection_id, video_id)
+);
+CREATE TABLE IF NOT EXISTS bookmarks (
+    bookmark_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id TEXT NOT NULL REFERENCES videos(video_id) ON DELETE CASCADE,
+    timestamp_seconds REAL NOT NULL CHECK(timestamp_seconds >= 0),
+    label TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_video_tags_video ON video_tags(video_id);
+CREATE INDEX IF NOT EXISTS idx_collection_videos_video ON collection_videos(video_id);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_video ON bookmarks(video_id);
+"""
+
+STATS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS video_stats (
+    snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id TEXT NOT NULL REFERENCES videos(video_id) ON DELETE CASCADE,
+    view_count INTEGER CHECK(view_count IS NULL OR view_count >= 0),
+    like_count INTEGER CHECK(like_count IS NULL OR like_count >= 0),
+    comment_count INTEGER CHECK(comment_count IS NULL OR comment_count >= 0),
+    fetched_at TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'yt-dlp'
+);
+CREATE INDEX IF NOT EXISTS idx_video_stats_video_time
+    ON video_stats(video_id, fetched_at DESC, snapshot_id DESC);
+"""
+
+# Released migration strings are immutable; append new migrations instead of
+# editing an existing entry so databases upgrade sequentially.
+MIGRATIONS: tuple[str, ...] = (SCHEMA, CURATION_SCHEMA, STATS_SCHEMA)
+CATALOG_SCHEMA_VERSION = len(MIGRATIONS)
 
 TRANSCRIPT_EXISTS_CLAUSE = """
 EXISTS (
@@ -153,7 +267,8 @@ NOT EXISTS (
 """.strip()
 
 VIDEO_ORDER_BY = """
- ORDER BY COALESCE(v.upload_date, '') DESC, COALESCE(v.downloaded_at, '') DESC LIMIT ?
+ ORDER BY COALESCE(v.upload_date, '') DESC, COALESCE(v.downloaded_at, '') DESC
+ LIMIT ? OFFSET ?
 """.strip()
 
 
@@ -181,6 +296,16 @@ class PlaylistUpsert:
     channel: str
     webpage_url: str | None
     position: int | None
+
+
+@dataclass(frozen=True)
+class CommentUpsert:
+    comment_id: str
+    author: str
+    text: str
+    published_at: str | None
+    like_count: int
+    parent_id: str | None
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
@@ -235,6 +360,37 @@ def _language_match_clause(language: str) -> tuple[str, str]:
     return "=", raw
 
 
+def _apply_migrations(
+    conn: sqlite3.Connection,
+    *,
+    current_version: int,
+    migrations: Sequence[str] = MIGRATIONS,
+) -> None:
+    """Apply all pending migrations in one transaction, in version order."""
+    target_version = len(migrations)
+    if current_version > target_version:
+        raise sqlite3.DatabaseError(
+            "Catalog schema version "
+            f"{current_version} is newer than supported version {target_version}"
+        )
+    if current_version == target_version:
+        return
+
+    statements = ["BEGIN IMMEDIATE;"]
+    for version, migration in enumerate(
+        migrations[current_version:], start=current_version + 1
+    ):
+        statements.append(migration)
+        statements.append(f"PRAGMA user_version = {version};")
+    statements.append("COMMIT;")
+    try:
+        conn.executescript("\n".join(statements))
+    except sqlite3.Error:
+        if conn.in_transaction:
+            conn.rollback()
+        raise
+
+
 class VideoDetails(TypedDict):
     video: CatalogVideo
     chapters: list[ChapterEntry]
@@ -255,14 +411,18 @@ class CatalogStore:
         if effective_readonly:
             if not self.path.exists():
                 raise FileNotFoundError(self.path)
-            conn = sqlite3.connect(f"file:{quote(str(self.path.resolve()))}?mode=ro", uri=True)
+            conn = sqlite3.connect(
+                f"file:{quote(str(self.path.resolve()))}?mode=ro",
+                uri=True,
+                factory=_ClosingConnection,
+            )
         else:
             if not self._write_path_ready:
                 ensure_private_file(self.path)
                 self._write_path_ready = True
             elif self.path.is_symlink():
                 raise OSError(f"Refusing to operate on symlink: {self.path}")
-            conn = sqlite3.connect(self.path)
+            conn = sqlite3.connect(self.path, factory=_ClosingConnection)
             conn.execute("PRAGMA synchronous = NORMAL")
         conn.row_factory = sqlite3.Row
         if logger.isEnabledFor(logging.DEBUG):
@@ -277,7 +437,8 @@ class CatalogStore:
 
     def ensure_schema(self) -> None:
         with self.connect() as conn:
-            conn.executescript(SCHEMA)
+            current_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            _apply_migrations(conn, current_version=current_version)
 
     def initialize(self) -> None:
         self.ensure_schema()
@@ -295,14 +456,20 @@ class CatalogStore:
                 ON CONFLICT(video_id) DO UPDATE SET
                     title = excluded.title,
                     channel = excluded.channel,
-                    upload_date = excluded.upload_date,
-                    duration_seconds = excluded.duration_seconds,
+                    upload_date = COALESCE(excluded.upload_date, videos.upload_date),
+                    duration_seconds = COALESCE(
+                        excluded.duration_seconds, videos.duration_seconds
+                    ),
                     extractor_key = excluded.extractor_key,
                     webpage_url = excluded.webpage_url,
-                    requested_input = excluded.requested_input,
-                    source_query = excluded.source_query,
-                    output_path = excluded.output_path,
-                    info_json_path = excluded.info_json_path,
+                    requested_input = COALESCE(
+                        excluded.requested_input, videos.requested_input
+                    ),
+                    source_query = COALESCE(excluded.source_query, videos.source_query),
+                    output_path = COALESCE(excluded.output_path, videos.output_path),
+                    info_json_path = COALESCE(
+                        excluded.info_json_path, videos.info_json_path
+                    ),
                     downloaded_at = COALESCE(excluded.downloaded_at, videos.downloaded_at),
                     indexed_at = excluded.indexed_at
                 """,
@@ -395,6 +562,56 @@ class CatalogStore:
                         (video_id, segment_id, segment.text),
                     )
 
+    def replace_comments(self, video_id: str, comments: Sequence[CommentUpsert]) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM comment_fts WHERE video_id = ?", (video_id,))
+            conn.execute("DELETE FROM comments WHERE video_id = ?", (video_id,))
+            for comment in comments:
+                conn.execute(
+                    """
+                    INSERT INTO comments (
+                        comment_id, video_id, author, text, published_at, like_count, parent_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        comment.comment_id,
+                        video_id,
+                        comment.author,
+                        comment.text,
+                        comment.published_at,
+                        comment.like_count,
+                        comment.parent_id,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO comment_fts (video_id, comment_id, text) VALUES (?, ?, ?)",
+                    (video_id, comment.comment_id, comment.text),
+                )
+
+    def search_comments(self, query: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        fts_query = _fts_query(query)
+        if not fts_query:
+            return []
+        try:
+            with self.connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT c.comment_id, c.video_id, c.author, c.text, c.published_at,
+                           c.like_count, c.parent_id, v.title, v.channel, v.webpage_url,
+                           bm25(comment_fts) AS score
+                    FROM comment_fts
+                    JOIN comments c ON c.comment_id = comment_fts.comment_id
+                    JOIN videos v ON v.video_id = c.video_id
+                    WHERE comment_fts MATCH ?
+                    ORDER BY score, c.like_count DESC
+                    LIMIT ?
+                    """,
+                    (fts_query, limit),
+                ).fetchall()
+        except FileNotFoundError:
+            return []
+        return [_row_to_dict(row) for row in rows]
+
     def upsert_playlist_entry(self, playlist: PlaylistUpsert, video_id: str) -> None:
         with self.connect() as conn:
             conn.execute(
@@ -415,6 +632,39 @@ class CatalogStore:
                 ON CONFLICT(playlist_id, video_id) DO UPDATE SET position = excluded.position
                 """,
                 (playlist.playlist_id, video_id, playlist.position),
+            )
+
+    def replace_playlist_entries(
+        self,
+        playlist: PlaylistUpsert,
+        entries: Sequence[tuple[str, int | None]],
+    ) -> None:
+        """Replace the known contents of a fully inspected playlist."""
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO playlists (playlist_id, title, channel, webpage_url)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(playlist_id) DO UPDATE SET
+                    title = excluded.title,
+                    channel = excluded.channel,
+                    webpage_url = COALESCE(excluded.webpage_url, playlists.webpage_url)
+                """,
+                (playlist.playlist_id, playlist.title, playlist.channel, playlist.webpage_url),
+            )
+            conn.execute(
+                "DELETE FROM playlist_entries WHERE playlist_id = ?",
+                (playlist.playlist_id,),
+            )
+            conn.executemany(
+                """
+                INSERT INTO playlist_entries (playlist_id, video_id, position)
+                VALUES (?, ?, ?)
+                """,
+                (
+                    (playlist.playlist_id, video_id, position)
+                    for video_id, position in entries
+                ),
             )
 
     def get_video(self, video_id: str, *, readonly: bool | None = None) -> CatalogVideo | None:
@@ -448,6 +698,7 @@ class CatalogStore:
         self,
         *,
         limit: int = 25,
+        offset: int = 0,
         channel: str | None = None,
         playlist_id: str | None = None,
         has_transcript: bool | None = None,
@@ -488,7 +739,7 @@ class CatalogStore:
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
         query += f" {VIDEO_ORDER_BY}"
-        params.append(limit)
+        params.extend([limit, max(offset, 0)])
         try:
             with self.connect() as conn:
                 rows = conn.execute(query, params).fetchall()
@@ -501,6 +752,7 @@ class CatalogStore:
         query: str,
         *,
         limit: int = 25,
+        offset: int = 0,
         channel: str | None = None,
         playlist_id: str | None = None,
         has_transcript: bool | None = None,
@@ -509,6 +761,7 @@ class CatalogStore:
         if not query.strip():
             return self.list_videos(
                 limit=limit,
+                offset=offset,
                 channel=channel,
                 playlist_id=playlist_id,
                 has_transcript=has_transcript,
@@ -556,7 +809,7 @@ class CatalogStore:
             clauses.append(CHAPTER_MISSING_CLAUSE)
         sql += " WHERE " + " AND ".join(clauses)
         sql += f" {VIDEO_ORDER_BY}"
-        params.append(limit)
+        params.extend([limit, max(offset, 0)])
         try:
             with self.connect() as conn:
                 rows = conn.execute(sql, params).fetchall()
@@ -694,7 +947,13 @@ class CatalogStore:
                     """
                     SELECT segment_index, start_seconds, end_seconds, text
                     FROM transcript_segments
-                    WHERE video_id = ?
+                    WHERE track_id = (
+                        SELECT track_id
+                        FROM subtitle_tracks
+                        WHERE video_id = ?
+                        ORDER BY is_auto, lang, track_id
+                        LIMIT 1
+                    )
                     ORDER BY segment_index
                     LIMIT ?
                     """,
@@ -782,7 +1041,13 @@ class CatalogStore:
                     """
                     SELECT segment_index, start_seconds, end_seconds, text
                     FROM transcript_segments
-                    WHERE video_id = ?
+                    WHERE track_id = (
+                        SELECT track_id
+                        FROM subtitle_tracks
+                        WHERE video_id = ?
+                        ORDER BY is_auto, lang, track_id
+                        LIMIT 1
+                    )
                     ORDER BY segment_index
                     LIMIT 6
                     """,
@@ -983,6 +1248,7 @@ class CatalogStore:
                     SELECT
                         t.segment_id,
                         t.segment_index,
+                        t.track_id,
                         v.video_id,
                         v.title,
                         v.channel,
@@ -1003,11 +1269,11 @@ class CatalogStore:
                     """
                     SELECT text
                     FROM transcript_segments
-                    WHERE video_id = ? AND segment_index BETWEEN ? AND ?
+                    WHERE track_id = ? AND segment_index BETWEEN ? AND ?
                     ORDER BY segment_index
                     """,
                     (
-                        row["video_id"],
+                        row["track_id"],
                         max(int(row["segment_index"]) - 1, 0),
                         int(row["segment_index"]) + 1,
                     ),
@@ -1035,15 +1301,19 @@ class CatalogStore:
         cache_dir = (self.path.parent / "subtitle-cache" / video_id).resolve()
         safe_root = (self.path.parent / "subtitle-cache").resolve()
         with self.connect() as conn:
+            conn.execute("DELETE FROM comment_fts WHERE video_id = ?", (video_id,))
             conn.execute("DELETE FROM chapter_fts WHERE video_id = ?", (video_id,))
             conn.execute("DELETE FROM transcript_fts WHERE video_id = ?", (video_id,))
             cursor = conn.execute("DELETE FROM videos WHERE video_id = ?", (video_id,))
+            deleted = cursor.rowcount > 0
         if cache_dir != safe_root and cache_dir.is_relative_to(safe_root):
             shutil.rmtree(cache_dir, ignore_errors=True)
-        return cursor.rowcount > 0
+        return deleted
 
     def clear(self) -> None:
         with self.connect() as conn:
+            conn.execute("DELETE FROM comment_fts")
+            conn.execute("DELETE FROM comments")
             conn.execute("DELETE FROM chapter_fts")
             conn.execute("DELETE FROM transcript_fts")
             conn.execute("DELETE FROM playlist_entries")

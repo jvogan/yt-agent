@@ -65,11 +65,31 @@ Agent-safe:
 
 If transcript coverage is missing, rerun step 1 with `--fetch-subs`.
 
-## 4. Agent-operator automation
+## 4. Curate, sync, and queue
+
+1. Add notes/tags/bookmarks with `yt-agent curate ...`; search them with `curate search`.
+2. Save recurring work with `yt-agent sync add NAME CHANNEL_OR_PLAYLIST_URL --kind KIND`, where
+   `KIND` is `channel` or `playlist`.
+3. Preview an incremental pass with `yt-agent sync run --dry-run --output json`.
+4. Queue typed work with `yt-agent queue add download TARGET` and run it synchronously with
+   `yt-agent queue run-next`.
+
+For live material, use `live record`; inspect available encodings first with `formats TARGET`.
+Use `open` or `play` for local files, catalog IDs, and clip result timestamps.
+
+## 5. Verify, back up, and repair
+
+1. `yt-agent verify --deep --output json`
+2. `yt-agent backup create backup.json --output json`
+3. Preview derived-state fixes with `yt-agent repair --output json`.
+4. Apply only reviewed repairs with `yt-agent repair --apply --output json`. Backup restore also
+   supports a validation-only dry run.
+
+## 6. Agent-operator automation
 
 Use the CLI as a stable execution layer:
 
-1. Inspect with `doctor`, `search`, `info`, `library`, or `clips ... --output json`
+1. Inspect with `doctor --deep`, `search`, `info`, `formats`, `library`, or `clips ... --output json`
 2. Preview mutations with `--dry-run --output json`
 3. Wait for approval
 4. Execute the approved mutation with `--quiet --output json`

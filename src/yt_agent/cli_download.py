@@ -19,11 +19,32 @@ from yt_agent.cli_output import (
 )
 from yt_agent.config import Settings
 from yt_agent.errors import ExternalCommandError, InvalidInputError
+from yt_agent.events import JsonlEventWriter
 from yt_agent.indexer import index_manifest_record
 from yt_agent.manifest import append_manifest_record
 from yt_agent.models import DownloadTarget, ManifestRecord, VideoInfo
 from yt_agent.security import sanitize_terminal_text
 from yt_agent.selector import parse_selection, select_results
+
+
+def _validate_events_path(settings: Settings, path: Path | None) -> None:
+    if path is None:
+        return
+    resolved = path.expanduser().resolve(strict=False)
+    protected_files = {
+        settings.config_path.resolve(strict=False),
+        settings.archive_file.resolve(strict=False),
+        settings.manifest_file.resolve(strict=False),
+        settings.catalog_file.resolve(strict=False),
+    }
+    if resolved in protected_files:
+        raise InvalidInputError("--events-jsonl must not overwrite yt-agent state files.")
+    for media_root in (settings.download_root, settings.clips_root):
+        try:
+            resolved.relative_to(media_root.resolve(strict=False))
+        except ValueError:
+            continue
+        raise InvalidInputError("--events-jsonl must be outside media and clip directories.")
 
 
 def _read_targets_from_file(path: Path) -> list[str]:
@@ -43,13 +64,24 @@ def _download_targets(
     auto_subs: bool = False,
     quiet: bool = False,
     show_failure_details: bool = True,
+    sponsorblock: bool = False,
+    sponsorblock_remove: bool = False,
+    events_jsonl: Path | None = None,
     append_manifest_record_fn: Callable[[Path, ManifestRecord], None] = append_manifest_record,
     index_manifest_record_fn: Callable[..., Any] = index_manifest_record,
 ) -> list[DownloadOperationItem]:
     archive_entries = load_archive_entries(settings.archive_file)
+    events = JsonlEventWriter(events_jsonl) if events_jsonl is not None else None
     items: list[DownloadOperationItem] = []
     for target in targets:
         if is_archived(archive_entries, target.info):
+            if events:
+                events.emit(
+                    "download.skipped",
+                    video_id=target.info.video_id,
+                    title=target.info.title,
+                    reason="already archived",
+                )
             item = DownloadOperationItem(
                 status="skipped",
                 info=target.info,
@@ -72,11 +104,28 @@ def _download_targets(
                 style="cyan",
                 markup=False,
             )
+        if events:
+            events.emit(
+                "download.started", video_id=target.info.video_id, title=target.info.title
+            )
         try:
             execution = yt_dlp.download_target(
-                target, settings, mode=mode, fetch_subs=fetch_subs, auto_subs=auto_subs
+                target,
+                settings,
+                mode=mode,
+                fetch_subs=fetch_subs,
+                auto_subs=auto_subs,
+                sponsorblock=sponsorblock,
+                sponsorblock_remove=sponsorblock_remove,
             )
         except ExternalCommandError as exc:
+            if events:
+                events.emit(
+                    "download.failed",
+                    video_id=target.info.video_id,
+                    title=target.info.title,
+                    message=str(exc),
+                )
             item = DownloadOperationItem(
                 status="failed",
                 info=target.info,
@@ -97,6 +146,13 @@ def _download_targets(
                 )
             continue
         if execution is None:
+            if events:
+                events.emit(
+                    "download.skipped",
+                    video_id=target.info.video_id,
+                    title=target.info.title,
+                    reason="archive reported by yt-dlp",
+                )
             item = DownloadOperationItem(
                 status="skipped",
                 info=target.info,
@@ -119,6 +175,13 @@ def _download_targets(
             info_json_path=execution.info_json_path,
         )
         append_manifest_record_fn(settings.manifest_file, record)
+        if events:
+            events.emit(
+                "download.completed",
+                video_id=target.info.video_id,
+                title=target.info.title,
+                output_path=str(execution.output_path),
+            )
         archive_entries.add(target.info.archive_key)
         item = DownloadOperationItem(
             status="downloaded",
@@ -140,6 +203,8 @@ def _download_targets(
             item = DownloadOperationItem(
                 **{**item.__dict__, "indexed": True, "index_summary": summary}
             )
+            if events:
+                events.emit("index.completed", video_id=target.info.video_id)
         except Exception as exc:  # pragma: no cover - indexing is a best-effort follow-up
             item = DownloadOperationItem(
                 **{**item.__dict__, "index_warning": sanitize_terminal_text(exc)}
@@ -149,6 +214,10 @@ def _download_targets(
                     f"Warning: post-download indexing failed: {sanitize_terminal_text(exc)}",
                     style="yellow",
                     markup=False,
+                )
+            if events:
+                events.emit(
+                    "index.failed", video_id=target.info.video_id, message=str(exc)
                 )
         items.append(item)
     return items
@@ -294,6 +363,9 @@ def _run_download_flow(
     mode: str,
     fetch_subs: bool,
     auto_subs: bool,
+    sponsorblock: bool,
+    sponsorblock_remove: bool,
+    events_jsonl: Path | None,
     dry_run: bool,
     quiet: bool,
     output_mode: str,
@@ -312,15 +384,21 @@ def _run_download_flow(
 
     with lock_factory(lock_path):
         prepare_storage(settings)
-        items = download_targets_fn(
-            resolved_targets,
-            settings,
-            mode=mode,
-            fetch_subs=fetch_subs,
-            auto_subs=auto_subs,
-            quiet=quiet or normalized_output == "json",
-            show_failure_details=normalized_output != "json",
-        )
+        download_kwargs: dict[str, Any] = {
+            "mode": mode,
+            "fetch_subs": fetch_subs,
+            "auto_subs": auto_subs,
+            "quiet": quiet or normalized_output == "json",
+            "show_failure_details": normalized_output != "json",
+        }
+        # Preserve compatibility for injected download functions when the
+        # opt-in SponsorBlock feature is not being used.
+        if sponsorblock or sponsorblock_remove:
+            download_kwargs["sponsorblock"] = sponsorblock
+            download_kwargs["sponsorblock_remove"] = sponsorblock_remove
+        if events_jsonl is not None:
+            download_kwargs["events_jsonl"] = events_jsonl
+        items = download_targets_fn(resolved_targets, settings, **download_kwargs)
     return resolved_targets, skipped_messages, items
 
 
@@ -333,6 +411,9 @@ def download_command(
     audio: bool,
     fetch_subs: bool,
     auto_subs: bool,
+    sponsorblock: bool,
+    sponsorblock_remove: bool,
+    events_jsonl: Path | None,
     dry_run: bool,
     quiet: bool,
     use_fzf: bool,
@@ -349,7 +430,10 @@ def download_command(
     render_download_payload: Callable[..., None],
 ) -> dict[str, Any]:
     settings = load_settings(config)
+    _validate_events_path(settings, events_jsonl)
     _validate_subtitle_flags(fetch_subs, auto_subs)
+    if sponsorblock_remove:
+        sponsorblock = True
     if _normalize_output_mode(output) == "json" and select_playlist and select is None:
         raise InvalidInputError("--select-playlist with --output json requires --select.")
     all_inputs: list[str] = list(targets)
@@ -374,6 +458,9 @@ def download_command(
         mode=mode,
         fetch_subs=fetch_subs,
         auto_subs=auto_subs,
+        sponsorblock=sponsorblock,
+        sponsorblock_remove=sponsorblock_remove,
+        events_jsonl=events_jsonl,
         dry_run=dry_run,
         quiet=quiet,
         output_mode=output,
@@ -399,6 +486,11 @@ def download_command(
         dry_run=dry_run,
         skipped_messages=skipped_messages,
     )
+    payload["sponsorblock"] = {
+        "enabled": sponsorblock,
+        "mode": "remove" if sponsorblock_remove else ("mark" if sponsorblock else "off"),
+        "categories": "all" if sponsorblock else None,
+    }
     render_download_payload(payload, output_mode=output, quiet=quiet)
     return payload
 
@@ -412,6 +504,9 @@ def grab_command(
     audio: bool,
     fetch_subs: bool,
     auto_subs: bool,
+    sponsorblock: bool,
+    sponsorblock_remove: bool,
+    events_jsonl: Path | None,
     dry_run: bool,
     quiet: bool,
     output: str,
@@ -426,7 +521,10 @@ def grab_command(
     render_download_payload: Callable[..., None],
 ) -> dict[str, Any] | None:
     settings = load_settings(config)
+    _validate_events_path(settings, events_jsonl)
     _validate_subtitle_flags(fetch_subs, auto_subs)
+    if sponsorblock_remove:
+        sponsorblock = True
     mode = "audio" if audio or settings.default_mode == "audio" else "video"
     results: list[VideoInfo] | None = None
 
@@ -465,6 +563,9 @@ def grab_command(
         mode=mode,
         fetch_subs=fetch_subs,
         auto_subs=auto_subs,
+        sponsorblock=sponsorblock,
+        sponsorblock_remove=sponsorblock_remove,
+        events_jsonl=events_jsonl,
         dry_run=dry_run,
         quiet=quiet,
         output_mode=output,
@@ -488,5 +589,10 @@ def grab_command(
         download_root=settings.download_root,
         dry_run=dry_run,
     )
+    payload["sponsorblock"] = {
+        "enabled": sponsorblock,
+        "mode": "remove" if sponsorblock_remove else ("mark" if sponsorblock else "off"),
+        "categories": "all" if sponsorblock else None,
+    }
     render_download_payload(payload, output_mode=output, quiet=quiet)
     return payload

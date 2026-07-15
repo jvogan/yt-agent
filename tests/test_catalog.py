@@ -4,7 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from yt_agent.catalog import CatalogStore, VideoUpsert, _fts_query
+from yt_agent.catalog import (
+    CATALOG_SCHEMA_VERSION,
+    SCHEMA,
+    CatalogStore,
+    VideoUpsert,
+    _apply_migrations,
+    _fts_query,
+)
 from yt_agent.models import ChapterEntry, SubtitleTrack, TranscriptSegment
 
 ADVERSARIAL_LONG_TOKEN = "x" * 1001
@@ -14,6 +21,17 @@ ADVERSARIAL_RTL = "\u05e9\u05dc\u05d5\u05dd"
 ADVERSARIAL_COMBINING = "Cafe\u0301"
 ADVERSARIAL_VIDEO_ID = "adv123fts45"
 FALLBACK_VIDEO_ID = "plain123456"
+
+
+def test_catalog_connection_context_closes_handle(tmp_path: Path) -> None:
+    store = CatalogStore(tmp_path / "catalog.sqlite")
+    store.initialize()
+
+    with store.connect(readonly=True) as conn:
+        conn.execute("SELECT 1").fetchone()
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        conn.execute("SELECT 1")
 
 
 def test_catalog_indexes_and_queries_video(tmp_path: Path) -> None:
@@ -88,6 +106,44 @@ def test_catalog_indexes_and_queries_video(tmp_path: Path) -> None:
     assert len(details["subtitle_tracks"]) == 1
 
 
+def test_transcript_context_and_preview_stay_with_one_track(tmp_path: Path) -> None:
+    store = _indexed_store(tmp_path)
+    store.replace_transcripts(
+        "abc123def45",
+        [
+            (
+                SubtitleTrack("en", "manual", False, "vtt", tmp_path / "demo.en.vtt"),
+                [
+                    TranscriptSegment(0, 0.0, 1.0, "english before"),
+                    TranscriptSegment(1, 1.0, 2.0, "english needle"),
+                    TranscriptSegment(2, 2.0, 3.0, "english after"),
+                ],
+            ),
+            (
+                SubtitleTrack("fr", "manual", False, "vtt", tmp_path / "demo.fr.vtt"),
+                [
+                    TranscriptSegment(0, 0.0, 1.0, "french before"),
+                    TranscriptSegment(1, 1.0, 2.0, "french needle"),
+                    TranscriptSegment(2, 2.0, 3.0, "french after"),
+                ],
+            ),
+        ],
+    )
+
+    search_hit = store.search_clips(
+        "needle", source="transcript", language="en", limit=1
+    )[0]
+    hit = store.get_clip_hit(search_hit.result_id)
+
+    assert hit is not None
+    assert hit.context == "english before english needle english after"
+    assert [segment.text for segment in store.transcript_preview("abc123def45")] == [
+        "english before",
+        "english needle",
+        "english after",
+    ]
+
+
 def test_ensure_schema_is_idempotent(tmp_path: Path) -> None:
     store = CatalogStore(tmp_path / "catalog.sqlite")
     store.ensure_schema()
@@ -110,6 +166,154 @@ def test_ensure_schema_is_idempotent(tmp_path: Path) -> None:
         )
     )
     assert store.get_video("test123test1") is not None
+
+
+def test_list_and_search_videos_support_database_pagination(tmp_path: Path) -> None:
+    store = CatalogStore(tmp_path / "catalog.sqlite")
+    store.ensure_schema()
+    for index in range(5):
+        store.upsert_video(
+            VideoUpsert(
+                video_id=f"page-video-{index}",
+                title=f"Paged Result {index}",
+                channel="Paging Channel",
+                upload_date=f"2026-07-{index + 1:02d}",
+                duration_seconds=60,
+                extractor_key="Youtube",
+                webpage_url=f"https://www.youtube.com/watch?v=page-video-{index}",
+                requested_input=None,
+                source_query=None,
+                output_path=None,
+                info_json_path=None,
+                downloaded_at=None,
+                indexed_at=datetime.now(UTC).isoformat(),
+            )
+        )
+
+    assert [video.video_id for video in store.list_videos(limit=2, offset=2)] == [
+        "page-video-2",
+        "page-video-1",
+    ]
+    assert [
+        video.video_id for video in store.search_videos("Paged", limit=2, offset=3)
+    ] == ["page-video-1", "page-video-0"]
+
+
+def test_fresh_catalog_records_current_schema_version(tmp_path: Path) -> None:
+    store = CatalogStore(tmp_path / "catalog.sqlite")
+    store.ensure_schema()
+
+    with store.connect(readonly=True) as conn:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+    assert version == CATALOG_SCHEMA_VERSION
+
+
+def test_unversioned_catalog_upgrades_without_losing_data(tmp_path: Path) -> None:
+    path = tmp_path / "legacy.sqlite"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(SCHEMA)
+        conn.execute(
+            """
+            INSERT INTO videos (
+                video_id, title, channel, extractor_key, webpage_url, indexed_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy12345",
+                "Legacy video",
+                "Legacy channel",
+                "youtube",
+                "https://www.youtube.com/watch?v=legacy12345",
+                "2026-03-07T00:00:00+00:00",
+            ),
+        )
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
+
+    store = CatalogStore(path)
+    store.ensure_schema()
+
+    video = store.get_video("legacy12345")
+    assert video is not None
+    assert video.title == "Legacy video"
+    with store.connect(readonly=True) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == CATALOG_SCHEMA_VERSION
+
+
+def test_migration_sequence_rolls_back_atomically_on_failure() -> None:
+    conn = sqlite3.connect(":memory:")
+    migrations = (
+        "CREATE TABLE migration_marker (value TEXT);",
+        "INSERT INTO table_that_does_not_exist VALUES (1);",
+    )
+
+    with pytest.raises(sqlite3.OperationalError):
+        _apply_migrations(conn, current_version=0, migrations=migrations)
+
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
+    marker = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'migration_marker'"
+    ).fetchone()
+    assert marker is None
+
+
+def test_catalog_rejects_schema_versions_from_newer_releases(tmp_path: Path) -> None:
+    path = tmp_path / "future.sqlite"
+    with sqlite3.connect(path) as conn:
+        conn.execute(f"PRAGMA user_version = {CATALOG_SCHEMA_VERSION + 1}")
+
+    with pytest.raises(sqlite3.DatabaseError, match="newer than supported"):
+        CatalogStore(path).ensure_schema()
+
+
+def test_upsert_video_preserves_existing_nullable_metadata(tmp_path: Path) -> None:
+    store = CatalogStore(tmp_path / "catalog.sqlite")
+    store.initialize()
+    original = VideoUpsert(
+        video_id="test123test1",
+        title="Downloaded title",
+        channel="Channel",
+        upload_date="2026-03-07",
+        duration_seconds=120,
+        extractor_key="youtube",
+        webpage_url="https://www.youtube.com/watch?v=test123test1",
+        requested_input="original input",
+        source_query="original query",
+        output_path=tmp_path / "video.mp4",
+        info_json_path=tmp_path / "video.info.json",
+        downloaded_at="2026-03-07T00:00:00+00:00",
+        indexed_at="2026-03-07T00:00:00+00:00",
+    )
+    store.upsert_video(original)
+    store.upsert_video(
+        VideoUpsert(
+            video_id=original.video_id,
+            title="Remote title",
+            channel="Remote channel",
+            upload_date=None,
+            duration_seconds=None,
+            extractor_key="youtube",
+            webpage_url=original.webpage_url,
+            requested_input=None,
+            source_query=None,
+            output_path=None,
+            info_json_path=None,
+            downloaded_at=None,
+            indexed_at="2026-03-08T00:00:00+00:00",
+        )
+    )
+
+    video = store.get_video(original.video_id)
+    assert video is not None
+    assert video.title == "Remote title"
+    assert video.channel == "Remote channel"
+    assert video.upload_date == original.upload_date
+    assert video.duration_seconds == original.duration_seconds
+    assert video.requested_input == original.requested_input
+    assert video.source_query == original.source_query
+    assert video.output_path == original.output_path
+    assert video.info_json_path == original.info_json_path
+    assert video.downloaded_at == original.downloaded_at
 
 
 def test_list_videos_returns_no_nones(tmp_path: Path) -> None:

@@ -26,4 +26,9 @@ def load_archive_entries(path: Path) -> set[str]:
 
 
 def is_archived(entries: set[str], info: VideoInfo) -> bool:
-    return info.archive_key in entries
+    expected_extractor = info.extractor_key.casefold()
+    for entry in entries:
+        extractor, separator, video_id = entry.partition(" ")
+        if separator and extractor.casefold() == expected_extractor and video_id == info.video_id:
+            return True
+    return False

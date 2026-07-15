@@ -18,9 +18,11 @@ __all__ = [
     "POSIX_PRIVATE_FILE_MODE",
     "sanitize_terminal_text",
     "sanitize_json_payload",
+    "atomic_write_artifact_text",
     "atomic_write_text",
     "ensure_private_directory",
     "ensure_private_file",
+    "protect_artifact_file",
     "protect_private_tree",
     "operation_lock",
 ]
@@ -130,6 +132,43 @@ def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> N
         except FileNotFoundError:
             pass
         raise
+
+
+def atomic_write_artifact_text(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+    """Atomically replace a user-selected artifact without changing its parent directory."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink():
+        raise OSError(f"Refusing to operate on symlink: {path}")
+
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent, text=True
+    )
+    temp_path = Path(temp_name)
+    try:
+        _chmod(temp_path, POSIX_PRIVATE_FILE_MODE)
+        with os.fdopen(fd, "w", encoding=encoding) as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+        _chmod(path, POSIX_PRIVATE_FILE_MODE)
+    except Exception:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def protect_artifact_file(path: Path) -> None:
+    """Harden one generated artifact without changing parent or sibling permissions."""
+
+    if path.is_symlink():
+        raise OSError(f"Refusing to operate on symlink: {path}")
+    if not path.is_file():
+        raise OSError(f"Artifact is not a regular file: {path}")
+    _chmod(path, POSIX_PRIVATE_FILE_MODE)
 
 
 def ensure_private_directory(path: Path) -> None:

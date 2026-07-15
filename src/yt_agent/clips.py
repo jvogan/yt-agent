@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import subprocess
 import uuid
 from dataclasses import dataclass
@@ -129,6 +130,11 @@ def _run(args: list[str], message: str) -> None:
 def _clip_bounds(
     hit: ClipSearchHit, padding_before: float, padding_after: float
 ) -> tuple[float, float]:
+    values = (hit.start_seconds, hit.end_seconds, padding_before, padding_after)
+    if not all(math.isfinite(value) for value in values):
+        raise InvalidInputError("Clip times and padding must be finite numbers.")
+    if padding_before < 0 or padding_after < 0:
+        raise InvalidInputError("Clip padding must not be negative.")
     start = max(0.0, hit.start_seconds - padding_before)
     end = max(start + 0.1, hit.end_seconds + padding_after)
     return start, end
@@ -145,6 +151,10 @@ def _plan_resolved_clip(
     mode: str,
     prefer_remote: bool,
 ) -> PlannedClipExtraction:
+    if not math.isfinite(start_seconds) or not math.isfinite(end_seconds):
+        raise InvalidInputError("Clip start and end times must be finite numbers.")
+    if start_seconds < 0 or end_seconds <= start_seconds:
+        raise InvalidInputError("Clip end time must be greater than a non-negative start time.")
     local_media = media_path if media_path and media_path.exists() else None
     if local_media is not None and not prefer_remote:
         output_path = build_clip_output_path(
@@ -324,7 +334,10 @@ def plan_clip_for_range(
 ) -> PlannedClipExtraction:
     if mode not in {"fast", "accurate"}:
         raise InvalidInputError("Clip mode must be 'fast' or 'accurate'.")
-    if end_seconds <= start_seconds:
+    if not math.isfinite(start_seconds) or not math.isfinite(end_seconds):
+        raise InvalidInputError("--start-seconds and --end-seconds must be finite numbers.")
+    normalized_start = max(0.0, start_seconds)
+    if end_seconds <= normalized_start:
         raise InvalidInputError("--end-seconds must be greater than --start-seconds.")
 
     catalog = CatalogStore(settings.catalog_file, readonly=True)
@@ -347,7 +360,7 @@ def plan_clip_for_range(
         info,
         media_path=video.output_path,
         label="range",
-        start_seconds=max(0.0, start_seconds),
+        start_seconds=normalized_start,
         end_seconds=end_seconds,
         mode=mode,
         prefer_remote=prefer_remote,

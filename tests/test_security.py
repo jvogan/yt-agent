@@ -13,6 +13,7 @@ from yt_agent.errors import StateLockError
 from yt_agent.manifest import ensure_manifest_file
 from yt_agent.security import (
     _chmod,
+    atomic_write_artifact_text,
     atomic_write_text,
     ensure_private_directory,
     ensure_private_file,
@@ -73,6 +74,22 @@ def test_atomic_write_text_creates_private_file(tmp_path: Path) -> None:
 
     assert target.read_text(encoding="utf-8") == "demo\n"
     assert stat.S_IMODE(target.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission modes only")
+def test_atomic_artifact_writer_does_not_change_parent_or_siblings(tmp_path: Path) -> None:
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o755)
+    sibling = shared / "sibling.txt"
+    sibling.write_text("keep\n", encoding="utf-8")
+    sibling.chmod(0o644)
+
+    target = shared / "artifact.txt"
+    atomic_write_artifact_text(target, "artifact\n")
+
+    assert stat.S_IMODE(shared.stat().st_mode) == 0o755
+    assert stat.S_IMODE(sibling.stat().st_mode) == 0o644
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
 
 

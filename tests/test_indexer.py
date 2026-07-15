@@ -14,7 +14,14 @@ from yt_agent.indexer import (
     index_target,
 )
 from yt_agent.manifest import append_manifest_record
-from yt_agent.models import DownloadTarget, ManifestRecord, VideoInfo
+from yt_agent.models import (
+    ChapterEntry,
+    DownloadTarget,
+    ManifestRecord,
+    SubtitleTrack,
+    TranscriptSegment,
+    VideoInfo,
+)
 
 
 def _target() -> DownloadTarget:
@@ -199,7 +206,8 @@ def test_index_transcripts_fetches_remote_sidecars_and_skips_missing_files(setti
     assert set(tracks) == {"en", "es"}
     assert tracks["en"].is_auto is False
     assert tracks["es"].is_auto is True
-    assert [segment.text for segment in details["transcript_preview"]] == ["manual line", "auto line"]
+    # A preview represents one coherent track; manual captions are preferred.
+    assert [segment.text for segment in details["transcript_preview"]] == ["manual line"]
 
 
 def test_index_manifest_record_discovers_info_json_when_record_path_is_missing(settings, monkeypatch) -> None:
@@ -256,12 +264,100 @@ def test_index_manifest_record_discovers_info_json_when_record_path_is_missing(s
     assert video.info_json_path == info_json_path
 
 
-def test_playlist_id_from_payload_prefers_explicit_ids_and_falls_back_to_hash() -> None:
+def test_playlist_id_from_payload_prefers_explicit_ids_and_falls_back_to_stable_hash() -> None:
     assert _playlist_id_from_payload({"id": "PL123"}, "https://example.com/playlist") == "PL123"
     assert _playlist_id_from_payload({"playlist_id": "PL456"}, "https://example.com/playlist") == "PL456"
     assert _playlist_id_from_payload({}, "https://example.com/playlist") == (
-        f"playlist:{abs(hash('https://example.com/playlist'))}"
+        "playlist:515973fb4c6b1f8ed981ef7d"
     )
+
+
+def test_index_refresh_authoritatively_removes_deleted_chapters_and_transcripts(settings) -> None:
+    output_path = settings.download_root / "Channel" / "video.mp4"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(b"video")
+    info_json_path = Path(f"{output_path}.info.json")
+    payload = {
+        "id": "abc123def45",
+        "title": "Demo Video",
+        "channel": "Channel",
+        "duration": 120,
+        "webpage_url": "https://www.youtube.com/watch?v=abc123def45",
+        "extractor_key": "youtube",
+        "chapters": [{"title": "Old", "start_time": 0, "end_time": 10}],
+    }
+    info_json_path.write_text(json.dumps(payload), encoding="utf-8")
+    subtitle_path = Path(f"{output_path}.en.vtt")
+    subtitle_path.write_text(
+        "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nold transcript\n",
+        encoding="utf-8",
+    )
+    record = ManifestRecord.from_download(
+        _target(), output_path=output_path, info_json_path=info_json_path
+    )
+
+    index_manifest_record(settings, record)
+    payload["chapters"] = []
+    info_json_path.write_text(json.dumps(payload), encoding="utf-8")
+    subtitle_path.unlink()
+    summary = index_manifest_record(settings, record)
+
+    details = CatalogStore(settings.catalog_file).get_video_details("abc123def45")
+    assert details is not None
+    assert details["chapters"] == []
+    assert details["subtitle_tracks"] == []
+    assert summary.chapters == 0
+    assert summary.transcript_segments == 0
+
+
+def test_index_target_does_not_clear_uninspected_chapters_or_transcripts(settings, monkeypatch) -> None:
+    import yt_agent.indexer as indexer
+
+    store = CatalogStore(settings.catalog_file)
+    store.ensure_schema()
+    info = _target().info
+    _upsert_video(store, info)
+    store.replace_chapters(
+        info.video_id,
+        [ChapterEntry(position=0, title="Local", start_seconds=0, end_seconds=10)],
+    )
+    store.replace_transcripts(
+        info.video_id,
+        [
+            (
+                SubtitleTrack(
+                    lang="en",
+                    source="manual",
+                    is_auto=False,
+                    format="vtt",
+                    file_path=settings.download_root / "missing.en.vtt",
+                ),
+                [
+                    TranscriptSegment(
+                        segment_index=0,
+                        start_seconds=1,
+                        end_seconds=2,
+                        text="local transcript",
+                    )
+                ],
+            )
+        ],
+    )
+    remote_payload = {
+        "id": info.video_id,
+        "title": "Updated title",
+        "channel": info.channel,
+        "extractor_key": info.extractor_key,
+        "webpage_url": info.webpage_url,
+    }
+    monkeypatch.setattr(indexer.yt_dlp, "fetch_info", lambda target: remote_payload)
+
+    index_target(settings, info.webpage_url)
+
+    details = store.get_video_details(info.video_id)
+    assert details is not None
+    assert [chapter.title for chapter in details["chapters"]] == ["Local"]
+    assert len(details["subtitle_tracks"]) == 1
 
 
 def test_index_target_indexes_playlist_entries_and_preserves_positions(settings, monkeypatch) -> None:
@@ -317,6 +413,16 @@ def test_index_target_indexes_playlist_entries_and_preserves_positions(settings,
     assert [(row["video_id"], row["position"]) for row in playlist_entries] == [
         ("video-one", 1),
         ("video-two", 3),
+    ]
+
+    playlist_payload["entries"] = [playlist_payload["entries"][2]]
+    index_target(settings, "https://www.youtube.com/playlist?list=PL123")
+    with store.connect(readonly=True) as conn:
+        refreshed_entries = conn.execute(
+            "SELECT video_id, position FROM playlist_entries ORDER BY position"
+        ).fetchall()
+    assert [(row["video_id"], row["position"]) for row in refreshed_entries] == [
+        ("video-two", 1)
     ]
 
 

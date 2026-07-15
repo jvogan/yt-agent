@@ -10,7 +10,9 @@ from yt_agent.yt_dlp import (
     ResolutionResult,
     command_path,
     download_target,
+    fetch_comments,
     normalize_target,
+    record_live,
     resolve_payload,
     resolve_targets,
     search,
@@ -101,6 +103,21 @@ def test_search_parses_dump_single_json(monkeypatch) -> None:
             original_url=None,
         )
     ]
+
+
+def test_search_debug_logging_redacts_query(monkeypatch, caplog) -> None:
+    def fake_run(args, text, capture_output, check, **kwargs):
+        return subprocess.CompletedProcess(args, 0, stdout='{"entries": []}', stderr="")
+
+    monkeypatch.setattr("yt_agent.yt_dlp.shutil.which", lambda _: "/opt/homebrew/bin/yt-dlp")
+    monkeypatch.setattr("yt_agent.yt_dlp.subprocess.run", fake_run)
+
+    with caplog.at_level("DEBUG", logger="yt_agent"):
+        search("private project codename", limit=5)
+
+    log_text = caplog.text
+    assert "ytsearch5:<query>" in log_text
+    assert "private project codename" not in log_text
 
 
 def test_search_rejects_url_queries(monkeypatch) -> None:
@@ -194,6 +211,22 @@ def test_download_target_returns_none_on_archive_skip(monkeypatch, tmp_path) -> 
     assert result is None
 
 
+def test_download_target_has_no_wall_clock_timeout(monkeypatch, tmp_path) -> None:
+    settings = _make_settings(tmp_path)
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_run(args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("yt_agent.yt_dlp.shutil.which", lambda _: "/opt/homebrew/bin/yt-dlp")
+    monkeypatch.setattr("yt_agent.yt_dlp.subprocess.run", fake_run)
+
+    download_target(_make_target(), settings)
+
+    assert "timeout" not in captured_kwargs
+
+
 def test_download_target_audio_mode_uses_audio_format(monkeypatch, tmp_path) -> None:
     settings = _make_settings(tmp_path)
     captured: list[list[str]] = []
@@ -273,6 +306,28 @@ def test_run_json_raises_on_timeout(monkeypatch) -> None:
         search("demo", limit=5)
 
 
+def test_fetch_comments_uses_bounded_fixed_extractor_args(monkeypatch) -> None:
+    captured = []
+    monkeypatch.setattr("yt_agent.yt_dlp.shutil.which", lambda _: "/usr/bin/yt-dlp")
+
+    def fake_run(args, **kwargs):
+        captured.extend(args)
+        return subprocess.CompletedProcess(args, 0, stdout='{"id":"abc123def45"}', stderr="")
+
+    monkeypatch.setattr("yt_agent.yt_dlp.subprocess.run", fake_run)
+
+    fetch_comments("abc123def45", limit=25)
+
+    assert "--get-comments" in captured
+    assert "youtube:max_comments=25" in captured
+
+
+@pytest.mark.parametrize("limit", [0, 1001])
+def test_fetch_comments_rejects_unbounded_limits(limit) -> None:
+    with pytest.raises(InvalidInputError, match="between 1 and 1000"):
+        fetch_comments("abc123def45", limit=limit)
+
+
 def test_download_target_fetch_subs_appends_write_subs(monkeypatch, tmp_path) -> None:
     settings = _make_settings(tmp_path)
     captured: list[list[str]] = []
@@ -324,6 +379,40 @@ def test_download_target_no_subtitle_flags_by_default(monkeypatch, tmp_path) -> 
     assert "--write-subs" not in args
     assert "--write-auto-subs" not in args
     assert "--sub-langs" not in args
+
+
+def test_download_target_sponsorblock_marks_by_default(monkeypatch, tmp_path) -> None:
+    captured = []
+    monkeypatch.setattr("yt_agent.yt_dlp.shutil.which", lambda _: "/usr/bin/yt-dlp")
+    monkeypatch.setattr(
+        "yt_agent.yt_dlp.subprocess.run",
+        lambda args, **kwargs: (
+            captured.extend(args)
+            or subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        ),
+    )
+
+    download_target(_make_target(), _make_settings(tmp_path), sponsorblock=True)
+
+    assert "--sponsorblock-mark" in captured
+    assert "--sponsorblock-remove" not in captured
+
+
+def test_download_target_sponsorblock_removal_is_explicit(monkeypatch, tmp_path) -> None:
+    captured = []
+    monkeypatch.setattr("yt_agent.yt_dlp.shutil.which", lambda _: "/usr/bin/yt-dlp")
+    monkeypatch.setattr(
+        "yt_agent.yt_dlp.subprocess.run",
+        lambda args, **kwargs: (
+            captured.extend(args)
+            or subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        ),
+    )
+
+    download_target(_make_target(), _make_settings(tmp_path), sponsorblock_remove=True)
+
+    assert "--sponsorblock-remove" in captured
+    assert "--sponsorblock-mark" not in captured
 
 
 def test_download_target_rehardens_download_directory(monkeypatch, tmp_path) -> None:
@@ -380,3 +469,33 @@ def test_download_target_revalidates_persisted_webpage_url(monkeypatch, tmp_path
         download_target(target, settings)
 
     assert calls == []
+
+
+def test_record_live_uses_only_typed_live_options(monkeypatch, tmp_path) -> None:
+    settings = _make_settings(tmp_path)
+    output_path = settings.download_root / "Channel" / "live.mp4"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(b"live")
+    calls: list[list[str]] = []
+
+    def fake_run(args, text, capture_output, check, **kwargs):
+        calls.append(list(args))
+        return subprocess.CompletedProcess(args, 0, stdout=f"{output_path}\n", stderr="")
+
+    monkeypatch.setattr("yt_agent.yt_dlp.shutil.which", lambda _: "/usr/bin/yt-dlp")
+    monkeypatch.setattr("yt_agent.yt_dlp.subprocess.run", fake_run)
+
+    execution = record_live(
+        _make_target(), settings, live_from_start=True, wait_seconds=30
+    )
+
+    assert execution.output_path == output_path
+    args = calls[0]
+    assert "--live-from-start" in args
+    assert args[args.index("--wait-for-video") + 1] == "30"
+    assert args[-1] == "https://www.youtube.com/watch?v=abc123def45"
+
+
+def test_record_live_rejects_unbounded_wait(settings) -> None:
+    with pytest.raises(InvalidInputError, match="between 0 and 86400"):
+        record_live(_make_target(), settings, wait_seconds=86_401)

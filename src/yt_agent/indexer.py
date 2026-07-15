@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -81,9 +82,12 @@ def _index_transcripts(
     auto_subs: bool,
     lang: str | None,
 ) -> int:
-    subtitle_paths = (
-        discover_subtitle_files(media_path) if media_path and media_path.exists() else []
-    )
+    if media_path is not None and media_path.exists():
+        subtitle_paths = discover_subtitle_files(media_path)
+        transcripts_inspected = True
+    else:
+        subtitle_paths = []
+        transcripts_inspected = False
     info_payload = _load_info_json(info_json_path)
     if not subtitle_paths and fetch_subs:
         fetched_info_json, fetched_subtitle_paths = fetch_subtitle_sidecars(
@@ -95,6 +99,7 @@ def _index_transcripts(
         info_json_path = fetched_info_json or info_json_path
         info_payload = _load_info_json(info_json_path)
         subtitle_paths = fetched_subtitle_paths
+        transcripts_inspected = True
 
     manual_languages = set()
     auto_languages = set()
@@ -119,7 +124,7 @@ def _index_transcripts(
             auto_languages=auto_languages,
         )
         indexed_tracks.append((track, segments))
-    if indexed_tracks:
+    if transcripts_inspected:
         catalog.replace_transcripts(info.video_id, indexed_tracks)
     return sum(len(segments) for _, segments in indexed_tracks)
 
@@ -157,11 +162,10 @@ def _index_video_payload(
         )
     )
     chapter_count = 0
-    if payload:
+    if payload is not None and "chapters" in payload:
         chapters = extract_chapters(payload)
-        if chapters:
-            catalog.replace_chapters(info.video_id, chapters)
-            chapter_count = len(chapters)
+        catalog.replace_chapters(info.video_id, chapters)
+        chapter_count = len(chapters)
     transcript_segments = _index_transcripts(
         catalog,
         info,
@@ -244,7 +248,8 @@ def _playlist_id_from_payload(payload: dict[str, Any], source_input: str) -> str
     playlist_id = payload.get("id") or payload.get("playlist_id")
     if playlist_id:
         return str(playlist_id)
-    return f"playlist:{abs(hash(source_input))}"
+    digest = hashlib.sha256(source_input.encode("utf-8")).hexdigest()[:24]
+    return f"playlist:{digest}"
 
 
 def index_target(
@@ -260,6 +265,14 @@ def index_target(
     entries = payload.get("entries")
     if isinstance(entries, list):
         playlist_id = _playlist_id_from_payload(payload, target)
+        playlist = PlaylistUpsert(
+            playlist_id=playlist_id,
+            title=str(payload.get("title") or "Untitled Playlist"),
+            channel=str(payload.get("channel") or payload.get("uploader") or "Unknown Channel"),
+            webpage_url=str(payload.get("webpage_url") or target),
+            position=None,
+        )
+        indexed_entries: list[tuple[str, int | None]] = []
         summary = IndexSummary(playlists=1)
         for position, entry in enumerate(entries, start=1):
             if not entry:
@@ -281,18 +294,8 @@ def index_target(
                     lang=lang,
                 )
             )
-            catalog.upsert_playlist_entry(
-                PlaylistUpsert(
-                    playlist_id=playlist_id,
-                    title=str(payload.get("title") or "Untitled Playlist"),
-                    channel=str(
-                        payload.get("channel") or payload.get("uploader") or "Unknown Channel"
-                    ),
-                    webpage_url=str(payload.get("webpage_url") or target),
-                    position=position,
-                ),
-                info.video_id,
-            )
+            indexed_entries.append((info.video_id, position))
+        catalog.replace_playlist_entries(playlist, indexed_entries)
         return summary
 
     info = VideoInfo.from_yt_dlp(payload, original_url=target)
