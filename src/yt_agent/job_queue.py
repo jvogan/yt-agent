@@ -7,6 +7,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import TracebackType
 from typing import Any, Literal
 
 from yt_agent.errors import InvalidInputError
@@ -15,6 +16,21 @@ from yt_agent.security import ensure_private_file
 JobOperation = Literal["download", "index", "sync"]
 JOB_OPERATIONS = {"download", "index", "sync"}
 MAX_RETRIES = 10
+
+
+class _ClosingConnection(sqlite3.Connection):
+    """Commit or roll back a context block, then release the SQLite handle."""
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> Literal[False]:
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -82,7 +98,7 @@ class JobQueue:
 
     def connect(self) -> sqlite3.Connection:
         ensure_private_file(self.path)
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, factory=_ClosingConnection)
         conn.row_factory = sqlite3.Row
         return conn
 

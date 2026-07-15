@@ -24,6 +24,7 @@ The format is inspired by Keep a Changelog, and this project follows pre-1.0 sem
   inspected, and made fallback playlist IDs deterministic.
 - Prevented transcript context from crossing subtitle tracks, stale subtitle-cache contamination,
   non-finite clip ranges, archive-key case mismatches, and query leakage in verbose logs.
+- Closed catalog and queue SQLite handles after context-managed operations, including on errors.
 
 ### Changed
 

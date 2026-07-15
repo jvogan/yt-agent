@@ -23,6 +23,17 @@ ADVERSARIAL_VIDEO_ID = "adv123fts45"
 FALLBACK_VIDEO_ID = "plain123456"
 
 
+def test_catalog_connection_context_closes_handle(tmp_path: Path) -> None:
+    store = CatalogStore(tmp_path / "catalog.sqlite")
+    store.initialize()
+
+    with store.connect(readonly=True) as conn:
+        conn.execute("SELECT 1").fetchone()
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        conn.execute("SELECT 1")
+
+
 def test_catalog_indexes_and_queries_video(tmp_path: Path) -> None:
     store = CatalogStore(tmp_path / "catalog.sqlite")
     store.initialize()

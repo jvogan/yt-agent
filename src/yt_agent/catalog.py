@@ -9,7 +9,8 @@ import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypedDict
+from types import TracebackType
+from typing import Any, Literal, TypedDict
 from urllib.parse import quote
 
 from yt_agent.models import (
@@ -38,6 +39,21 @@ __all__ = [
 
 
 logger = logging.getLogger("yt_agent")
+
+
+class _ClosingConnection(sqlite3.Connection):
+    """Commit or roll back a context block, then release the SQLite handle."""
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> Literal[False]:
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -395,14 +411,18 @@ class CatalogStore:
         if effective_readonly:
             if not self.path.exists():
                 raise FileNotFoundError(self.path)
-            conn = sqlite3.connect(f"file:{quote(str(self.path.resolve()))}?mode=ro", uri=True)
+            conn = sqlite3.connect(
+                f"file:{quote(str(self.path.resolve()))}?mode=ro",
+                uri=True,
+                factory=_ClosingConnection,
+            )
         else:
             if not self._write_path_ready:
                 ensure_private_file(self.path)
                 self._write_path_ready = True
             elif self.path.is_symlink():
                 raise OSError(f"Refusing to operate on symlink: {self.path}")
-            conn = sqlite3.connect(self.path)
+            conn = sqlite3.connect(self.path, factory=_ClosingConnection)
             conn.execute("PRAGMA synchronous = NORMAL")
         conn.row_factory = sqlite3.Row
         if logger.isEnabledFor(logging.DEBUG):
@@ -1285,9 +1305,10 @@ class CatalogStore:
             conn.execute("DELETE FROM chapter_fts WHERE video_id = ?", (video_id,))
             conn.execute("DELETE FROM transcript_fts WHERE video_id = ?", (video_id,))
             cursor = conn.execute("DELETE FROM videos WHERE video_id = ?", (video_id,))
+            deleted = cursor.rowcount > 0
         if cache_dir != safe_root and cache_dir.is_relative_to(safe_root):
             shutil.rmtree(cache_dir, ignore_errors=True)
-        return cursor.rowcount > 0
+        return deleted
 
     def clear(self) -> None:
         with self.connect() as conn:

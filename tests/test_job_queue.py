@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -5,6 +6,17 @@ import pytest
 
 from yt_agent.errors import InvalidInputError
 from yt_agent.job_queue import JobQueue
+
+
+def test_queue_connection_context_closes_handle(tmp_path: Path) -> None:
+    queue = JobQueue(tmp_path / "jobs.sqlite")
+    queue.ensure_schema()
+
+    with queue.connect() as conn:
+        conn.execute("SELECT 1").fetchone()
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        conn.execute("SELECT 1")
 
 
 def test_queue_persists_and_claims_only_once(tmp_path: Path) -> None:
