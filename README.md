@@ -1,6 +1,6 @@
 # yt-agent
 
-![yt-agent hero](assets/brand/yt-agent-hero.png)
+![yt-agent social preview](assets/brand/yt-agent-social-preview-github.jpg)
 
 An Agent friendly YouTube skill. Point Anthropic's Claude Code, OpenAI's Codex, Google's Gemini, and more, at this repo and then have your preferred AI search, download, and process YouTube vids from terminal. 
 _______________________________________
@@ -53,6 +53,10 @@ yt-agent config path
 ```
 
 More install detail lives in [docs/getting-started.md](docs/getting-started.md). Shell-specific completion notes live in [docs/shell-completion.md](docs/shell-completion.md).
+
+## Original Banner
+
+![yt-agent hero](assets/brand/yt-agent-hero.png)
 
 ## Docker
 

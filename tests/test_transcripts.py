@@ -213,6 +213,41 @@ def test_fetch_subtitle_sidecars_cleans_retry_artifacts_but_preserves_info_json(
     assert call_count == 2
 
 
+def test_fetch_subtitle_sidecars_ignores_stale_cached_tracks_and_retries_auto(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "subs"
+    destination.mkdir()
+    stale = destination / "abc123def45.fr.vtt"
+    stale.write_text("WEBVTT\n\nstale\n", encoding="utf-8")
+    call_count = 0
+
+    def fake_run(args, text, capture_output, check, timeout):
+        nonlocal call_count
+        call_count += 1
+        if "--write-auto-subs" in args:
+            (destination / "abc123def45.en.vtt").write_text(
+                "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nautomatic\n",
+                encoding="utf-8",
+            )
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("yt_agent.transcripts.subprocess.run", fake_run)
+    monkeypatch.setattr("yt_agent.transcripts.command_path", lambda: "/usr/bin/yt-dlp")
+    monkeypatch.setattr("yt_agent.transcripts.normalize_target", lambda target: target)
+
+    _, paths = fetch_subtitle_sidecars(
+        "abc123def45",
+        destination,
+        languages=["en"],
+        allow_auto_subs=True,
+    )
+
+    assert paths == [destination / "abc123def45.en.vtt"]
+    assert not stale.exists()
+    assert call_count == 2
+
+
 def test_fetch_subtitle_sidecars_raises_external_error_on_command_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

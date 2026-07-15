@@ -18,6 +18,7 @@ from textual.widgets import DataTable, Footer, Header, Input, Label, ListItem, L
 
 from yt_agent.catalog import CatalogStore, VideoDetails
 from yt_agent.config import Settings
+from yt_agent.job_queue import JobQueue, QueueJob
 from yt_agent.models import CatalogVideo
 from yt_agent.security import sanitize_terminal_text
 
@@ -43,8 +44,30 @@ class CatalogLike(Protocol):
         has_transcript: bool | None = None,
         has_chapters: bool | None = None,
         limit: int = 50,
+        offset: int = 0,
+    ) -> list[CatalogVideo]: ...
+    def search_videos(
+        self,
+        query: str,
+        *,
+        channel: str | None = None,
+        playlist_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[CatalogVideo]: ...
     def get_video_details(self, video_id: str) -> VideoDetails | None: ...
+
+
+class QueueLike(Protocol):
+    def ensure_schema(self) -> None: ...
+    def add(
+        self,
+        operation: str,
+        target: str,
+        *,
+        options: dict[str, Any] | None = None,
+        max_retries: int = 2,
+    ) -> QueueJob: ...
 
 
 @dataclass(frozen=True)
@@ -93,19 +116,31 @@ class YtAgentTui(App[None]):
         ("o", "open_media", "Open Media"),
         ("c", "clip_action", "Clip"),
         ("d", "download_action", "Download"),
+        ("n", "next_page", "Next Page"),
+        ("p", "previous_page", "Previous Page"),
     ]
 
     selected_source: reactive[SourceItem | None] = reactive(None)
     selected_video_id: reactive[str | None] = reactive(None)
     filter_text: reactive[str] = reactive("")
 
-    def __init__(self, catalog: CatalogLike, *, download_root: Path | None = None) -> None:
+    PAGE_SIZE = 50
+
+    def __init__(
+        self,
+        catalog: CatalogLike,
+        *,
+        download_root: Path | None = None,
+        queue: QueueLike | None = None,
+    ) -> None:
         super().__init__()
         self.catalog = catalog
         self._download_root = download_root
+        self._queue = queue
         self._source_items: list[SourceItem] = []
-        self._source_videos: list[CatalogVideo] = []
         self._videos: list[CatalogVideo] = []
+        self._page = 0
+        self._has_next_page = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -118,6 +153,8 @@ class YtAgentTui(App[None]):
 
     def on_mount(self) -> None:
         self.catalog.initialize()
+        if self._queue is not None:
+            self._queue.ensure_schema()
         sources = self.query_one("#sources", ListView)
         table = self.query_one("#videos", DataTable)
         table.cursor_type = "row"
@@ -148,28 +185,37 @@ class YtAgentTui(App[None]):
             sources.append(ListItem(Label(item.label)))
 
     def _load_videos_for_source(self, item: SourceItem) -> list[CatalogVideo]:
+        kwargs: dict[str, Any] = {
+            "limit": self.PAGE_SIZE + 1,
+            "offset": self._page * self.PAGE_SIZE,
+        }
         if item.kind == "channel":
-            return self.catalog.list_videos(channel=item.value, limit=100)
-        if item.kind == "playlist":
-            return self.catalog.list_videos(playlist_id=item.value, limit=100)
-        return self.catalog.list_videos(limit=100)
+            kwargs["channel"] = item.value
+        elif item.kind == "playlist":
+            kwargs["playlist_id"] = item.value
+        query = self.filter_text.strip()
+        if query:
+            return self.catalog.search_videos(query, **kwargs)
+        return self.catalog.list_videos(**kwargs)
 
     def _apply_source(self, item: SourceItem) -> None:
         self.selected_source = item
-        self._source_videos = self._load_videos_for_source(item)
-        self._apply_filter()
+        self._page = 0
+        self._load_page()
+
+    def _load_page(self) -> None:
+        if self.selected_source is None:
+            self._videos = []
+            self._has_next_page = False
+        else:
+            rows = self._load_videos_for_source(self.selected_source)
+            self._has_next_page = len(rows) > self.PAGE_SIZE
+            self._videos = rows[: self.PAGE_SIZE]
+        self._render_videos()
 
     def _apply_filter(self) -> None:
-        query = self.filter_text.strip().lower()
-        if not query:
-            self._videos = list(self._source_videos)
-        else:
-            self._videos = [
-                video
-                for video in self._source_videos
-                if query in video.title.lower() or query in video.channel.lower()
-            ]
-        self._render_videos()
+        self._page = 0
+        self._load_page()
 
     def _render_videos(self) -> None:
         table = self.query_one("#videos", DataTable)
@@ -263,6 +309,22 @@ class YtAgentTui(App[None]):
             self._apply_source(self.selected_source)
         self.notify("Catalog view refreshed.")
 
+    def action_next_page(self) -> None:
+        if not self._has_next_page:
+            self.notify("Already on the last page.")
+            return
+        self._page += 1
+        self._load_page()
+        self.notify(f"Page {self._page + 1}.")
+
+    def action_previous_page(self) -> None:
+        if self._page == 0:
+            self.notify("Already on the first page.")
+            return
+        self._page -= 1
+        self._load_page()
+        self.notify(f"Page {self._page + 1}.")
+
     def action_open_media(self) -> None:
         if self.selected_video_id is None:
             self.notify("No video selected.", severity="warning")
@@ -293,21 +355,26 @@ class YtAgentTui(App[None]):
         if self.selected_video_id is None:
             self.notify("No video selected.", severity="warning")
             return
-        self.notify(
-            "Run: yt-agent clips search --source transcript 'query'  "
-            f"(video {sanitize_terminal_text(self.selected_video_id)})"
-        )
+        video_id = sanitize_terminal_text(self.selected_video_id)
+        self.copy_to_clipboard(video_id)
+        self.notify(f"Copied video ID {video_id} for clip search.")
 
     def action_download_action(self) -> None:
         if self.selected_video_id is None:
             self.notify("No video selected.", severity="warning")
             return
-        self.notify(f"Run: yt-agent download {sanitize_terminal_text(self.selected_video_id)}")
+        if self._queue is None:
+            self.notify("Download queue is unavailable.", severity="warning")
+            return
+        video_id = sanitize_terminal_text(self.selected_video_id)
+        job = self._queue.add("download", video_id)
+        self.notify(f"Queued download job {job.job_id} for {video_id}.")
 
 
 def launch_tui(settings: Settings) -> None:
     store = CatalogStore(settings.catalog_file)
-    app = YtAgentTui(store, download_root=settings.download_root)
+    queue = JobQueue(settings.catalog_file.parent / "jobs.sqlite")
+    app = YtAgentTui(store, download_root=settings.download_root, queue=queue)
     app.run()
 
 

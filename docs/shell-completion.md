@@ -14,6 +14,9 @@ After it finishes:
 
 - Restart the shell, or reload the relevant startup file.
 - Re-run the install command after reinstalling `yt-agent` or switching shells.
+- Completion is generated from the active Typer command tree, so current installs include newer
+  groups such as `backup`, `sync`, `comments`, `transcripts`, `preview`, `curate`, `queue`, and
+  `live` without a separately maintained completion list.
 - Keep using explicit commands in scripts and docs. Completion is for interactive use only.
 
 ## Bash
@@ -87,6 +90,7 @@ complete --do-complete "yt-agent do"
 ```
 
 `complete --do-complete "yt-agent do"` should print matching completions such as `doctor`.
+You can also smoke-test a newer group with `complete --do-complete "yt-agent queue "`.
 
 ## Troubleshooting
 

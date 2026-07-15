@@ -160,6 +160,12 @@ def fetch_subtitle_sidecars(
     ensure_private_directory(destination)
     output_template = destination / "%(id)s.%(ext)s"
 
+    # This directory is a persistent per-video cache.  Old subtitle files may
+    # belong to a previous language selector, and must not count as output from
+    # the current request (or prevent the automatic-caption fallback).
+    for cached_subtitle in destination.glob("*.vtt"):
+        cached_subtitle.unlink()
+
     def _run(write_auto_subs: bool) -> None:
         args = [
             command_path(),
@@ -193,17 +199,13 @@ def fetch_subtitle_sidecars(
             raise ExternalCommandError("yt-dlp failed while fetching subtitles.", stderr=stderr)
         protect_private_tree(destination)
 
-    before = {path.name for path in destination.iterdir()} if destination.exists() else set()
     _run(write_auto_subs=False)
-    after_manual = {path.name for path in destination.iterdir()}
     info_json = next(iter(sorted(destination.glob("*.info.json"))), None)
     subtitle_paths = sorted(destination.glob("*.vtt"))
     if subtitle_paths or not allow_auto_subs:
         return info_json, subtitle_paths
 
-    manual_only = after_manual - before
-    for path_name in manual_only:
-        candidate = destination / path_name
+    for candidate in destination.iterdir():
         if candidate.exists() and not candidate.name.endswith(".info.json"):
             candidate.unlink()
 

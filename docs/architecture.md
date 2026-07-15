@@ -6,19 +6,25 @@ At a high level:
 
 1. `yt-dlp` remains the external engine for YouTube metadata, search, downloads, subtitle fetches, and remote section downloads.
 2. `yt_agent` normalizes metadata, resolves output paths, protects local state, writes the append-only manifest, and indexes queryable state into SQLite.
-3. SQLite plus FTS5 power library browsing, transcript/chapter clip search, and the Textual TUI.
+3. Versioned SQLite plus FTS5 power library browsing, transcript/chapter/comment search,
+   curation, and the Textual TUI. Separate private stores hold saved sync sources and queued jobs.
 
 ## Runtime Layers
 
 - Entry surface: Typer CLI commands in `cli.py`, plus the package entrypoint in `__main__.py`.
 - Retrieval layer: `yt_dlp.py`, `transcripts.py`, and the external `yt-dlp` binary.
-- Local state layer: `config.py`, `archive.py`, `manifest.py`, `library.py`, and `security.py`.
-- Query/index layer: `catalog.py`, `indexer.py`, `chapters.py`, and the data models in `models.py`.
-- User interfaces: Rich-rendered CLI output, JSON mutation payloads, and the read-mostly Textual TUI in `tui.py`.
+- Local state layer: `config.py`, `archive.py`, `manifest.py`, `library.py`, `security.py`,
+  `job_queue.py`, and `backup.py`.
+- Query/index layer: `catalog.py`, `indexer.py`, `curation.py`, `comments.py`,
+  `chapters.py`, and the data models in `models.py`.
+- Workflow layer: `sync.py`, `job_queue.py`, `backup.py`, `verify.py`, and `repair.py`.
+- Media utilities: `clips.py`, `transcript_tools.py`, `playback.py`, and preview helpers.
+- User interfaces: Rich CLI output, stable JSON payloads, and the actionable Textual TUI.
 
 ## Module Dependency Diagram
 
-The main package contains 18 Python modules. The diagram below shows direct package-level dependencies inside `src/yt_agent`.
+The diagram below shows the original core dependency spine. Additional modules listed under
+"Module Roles" extend it without changing the central CLI → service → catalog pattern.
 
 ```text
                                +------------------+
@@ -103,7 +109,15 @@ Additional state helpers used directly by cli/index flows:
 - `__init__.py`: publishes `__version__`.
 - `__main__.py`: `python -m yt_agent` entrypoint; delegates straight to `cli.main()`.
 - `archive.py`: manages the yt-dlp-compatible archive file used to suppress duplicate downloads.
-- `catalog.py`: owns the SQLite schema, FTS5 tables, and high-level read/write/query APIs.
+- `catalog.py`: owns sequential schema migrations, FTS5 tables, and catalog APIs.
+- `backup.py`: snapshots core indexed content, comments, and curation records. Media,
+  manifest/archive state, queue/sync state, and timeline history remain separate.
+- `comments.py`: bounded comment normalization and local FTS indexing.
+- `curation.py`: user-owned notes, ratings, tags, collections, and bookmarks.
+- `job_queue.py`: private persistent synchronous jobs with bounded retry/backoff.
+- `playback.py`: safe argv-based mpv/system-opener launching.
+- `sync.py`: saved source definitions and incremental channel/playlist processing.
+- `transcript_tools.py`: transcript export and optional local whisper generation.
 - `chapters.py`: extracts normalized chapter rows from yt-dlp metadata payloads.
 - `cli.py`: the main application surface; command parsing, guarded execution, Rich output, JSON payloads.
 - `clips.py`: plans and executes clip extraction from catalog hits or explicit time ranges.
@@ -131,6 +145,10 @@ Default paths come from `config.py` and are intentionally split by responsibilit
 - Clip root: `~/Media/YouTube/_clips`
 - Subtitle cache: `<catalog parent>/subtitle-cache/<video-id>/`
 - Lock file: `<catalog parent>/operation.lock`
+- Saved sources: `<catalog parent>/sources.json`
+- Queue database: `<catalog parent>/jobs.sqlite`
+- Optional lifecycle events: the explicit path passed to `--events-jsonl`
+- Queue worker lock: `<catalog parent>/queue-worker.lock`
 
 This split matters because each file answers a different operational question:
 
@@ -149,14 +167,20 @@ The manifest is append-only audit data:
 - A broken later indexing pass does not erase that audit trail.
 - `index refresh` can rebuild query state from the manifest plus local sidecars.
 
-The catalog is a derived query layer:
+Most catalog rows are a derived query layer, while curation rows are user-owned:
 
 - Rows are upserted and replaced, not appended forever.
 - Chapters, subtitle tracks, transcript segments, and playlist entries can be refreshed.
 - FTS5 indexes are optimized for query speed, not immutable history.
+- Notes, ratings, tags, collections, and bookmarks survive versioned backup/restore.
 - The TUI, library commands, and clip search all depend on this low-latency query store.
 
 The practical consequence is that download success and catalog freshness are related but not transactional. A download can succeed, be recorded in the manifest, and still carry an `index_warning` if catalog enrichment fails. That tradeoff favors durable acquisition first and repairable indexing second.
+
+Catalog backups contain every authoritative relational catalog table, including comments and
+curation. FTS tables are derived from those rows during restore. Saved-source definitions and
+queued jobs are separate operational stores and intentionally remain outside the catalog-backup
+boundary.
 
 ## Download Data Flow
 

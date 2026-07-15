@@ -85,6 +85,24 @@ def test_clip_bounds_clamps_negative_start_and_enforces_minimum_duration() -> No
     assert end_seconds == pytest.approx(0.1)
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_clip_bounds_rejects_non_finite_values(value: float) -> None:
+    with pytest.raises(InvalidInputError, match="finite"):
+        _clip_bounds(_clip_hit(), value, 0.0)
+    with pytest.raises(InvalidInputError, match="finite"):
+        _clip_bounds(_clip_hit(start_seconds=value), 0.0, 0.0)
+    with pytest.raises(InvalidInputError, match="finite"):
+        _clip_bounds(_clip_hit(end_seconds=value), 0.0, 0.0)
+
+
+@pytest.mark.parametrize("padding_before,padding_after", [(-1.0, 0.0), (0.0, -1.0)])
+def test_clip_bounds_rejects_negative_padding(
+    padding_before: float, padding_after: float
+) -> None:
+    with pytest.raises(InvalidInputError, match="must not be negative"):
+        _clip_bounds(_clip_hit(), padding_before, padding_after)
+
+
 def test_video_info_from_hit_maps_fields_and_defaults() -> None:
     info = _video_info_from_hit(_clip_hit())
 
@@ -532,6 +550,29 @@ def test_extract_clip_for_range_raises_for_missing_video(settings) -> None:
             video_id="missing-video",
             start_seconds=1.0,
             end_seconds=2.0,
+        )
+
+
+@pytest.mark.parametrize(
+    "start_seconds,end_seconds",
+    [
+        (float("nan"), 2.0),
+        (1.0, float("nan")),
+        (float("inf"), 2.0),
+        (1.0, float("inf")),
+    ],
+)
+def test_plan_clip_for_range_rejects_non_finite_times(
+    settings, start_seconds: float, end_seconds: float
+) -> None:
+    from yt_agent.clips import plan_clip_for_range
+
+    with pytest.raises(InvalidInputError, match="finite"):
+        plan_clip_for_range(
+            settings,
+            video_id="abc123def45",
+            start_seconds=start_seconds,
+            end_seconds=end_seconds,
         )
 
 

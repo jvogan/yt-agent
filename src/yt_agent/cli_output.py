@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +25,7 @@ from yt_agent.security import sanitize_terminal_text
 READ_OUTPUT_HELP = "Render output as table, json, or plain text."
 OUTPUT_MODES = {"table", "json", "plain"}
 MUTATION_SCHEMA_VERSION = 1
+MINIMUM_SAFE_YT_DLP_VERSION = "2026.06.09"
 
 console = Console()
 error_console = Console(stderr=True)
@@ -197,7 +200,115 @@ def _tool_install_hint(tool_name: str) -> str:
     return ""
 
 
-def _doctor_payload(settings: Settings) -> dict[str, Any]:
+def _command_version(path: str | None, *args: str) -> str | None:
+    if path is None:
+        return None
+    try:
+        completed = subprocess.run(  # noqa: S603
+            [path, *args],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0:
+        return None
+    first_line = (completed.stdout or completed.stderr).strip().splitlines()
+    return first_line[0] if first_line else None
+
+
+def _date_version(value: str | None) -> tuple[int, int, int] | None:
+    if value is None:
+        return None
+    match = re.search(r"(\d{4})[.-](\d{1,2})[.-](\d{1,2})", value)
+    if match is None:
+        return None
+    year, month, day = match.groups()
+    return int(year), int(month), int(day)
+
+
+def _deep_doctor_capabilities() -> list[dict[str, Any]]:
+    yt_dlp_path = shutil.which("yt-dlp")
+    yt_dlp_version = _command_version(yt_dlp_path, "--version")
+    parsed_version = _date_version(yt_dlp_version)
+    minimum_version = _date_version(MINIMUM_SAFE_YT_DLP_VERSION)
+    version_safe = (
+        parsed_version is not None
+        and minimum_version is not None
+        and parsed_version >= minimum_version
+    )
+
+    ffprobe_path = shutil.which("ffprobe")
+    node_path = shutil.which("node")
+    deno_path = shutil.which("deno")
+    whisper_path = shutil.which("whisper-cli")
+    po_provider_path = shutil.which("bgutil-ytdlp-pot-provider")
+    node_version = _command_version(node_path, "--version")
+    deno_version = _command_version(deno_path, "--version")
+    ejs_ready = node_version is not None or deno_version is not None
+
+    return [
+        {
+            "name": "yt-dlp-version",
+            "status": "ok" if version_safe else "warning",
+            "installed": yt_dlp_path is not None,
+            "version": yt_dlp_version or "",
+            "minimum_safe_version": MINIMUM_SAFE_YT_DLP_VERSION,
+            "meets_minimum": version_safe,
+            "detail": "Upgrade yt-dlp when this check warns; YouTube extraction changes often.",
+        },
+        {
+            "name": "ffprobe",
+            "status": "ok" if ffprobe_path else "optional",
+            "installed": ffprobe_path is not None,
+            "version": _command_version(ffprobe_path, "-version") or "",
+            "detail": "Enables deep media integrity verification.",
+        },
+        {
+            "name": "ejs-runtime",
+            "status": "ok" if ejs_ready else "warning",
+            "installed": ejs_ready,
+            "version": "",
+            "runtimes": {
+                "node": {"installed": node_version is not None, "version": node_version or ""},
+                "deno": {"installed": deno_version is not None, "version": deno_version or ""},
+            },
+            "detail": "Node or Deno is needed for yt-dlp's external JavaScript challenge solver.",
+        },
+        {
+            "name": "whisper-cli",
+            "status": "ok" if whisper_path else "optional",
+            "installed": whisper_path is not None,
+            "version": _command_version(whisper_path, "--version") or "",
+            "detail": "Available for local transcript generation workflows.",
+        },
+        {
+            "name": "cookies",
+            "status": "not-configured",
+            "installed": False,
+            "version": "",
+            "detail": (
+                "yt-agent does not store or expose browser cookies; use a protected external "
+                "yt-dlp configuration only when necessary."
+            ),
+        },
+        {
+            "name": "po-token-provider",
+            "status": "ok" if po_provider_path else "optional",
+            "installed": po_provider_path is not None,
+            "version": "",
+            "detail": (
+                "A bgutil provider executable was detected."
+                if po_provider_path
+                else "No known external PO-token provider executable was detected."
+            ),
+        },
+    ]
+
+
+def _doctor_payload(settings: Settings, *, deep: bool = False) -> dict[str, Any]:
     tools: list[dict[str, Any]] = []
     for tool_name, required in (
         ("yt-dlp", True),
@@ -226,7 +337,7 @@ def _doctor_payload(settings: Settings) -> dict[str, Any]:
         )
     else:
         next_step = "Install yt-dlp first, then rerun yt-agent doctor."
-    return {
+    result = {
         "tools": tools,
         "paths": {
             "config": str(settings.config_path),
@@ -249,6 +360,9 @@ def _doctor_payload(settings: Settings) -> dict[str, Any]:
             "next_step": next_step,
         },
     }
+    if deep:
+        result["capabilities"] = _deep_doctor_capabilities()
+    return result
 
 
 def _video_row(info: VideoInfo, *, index: int | None = None) -> dict[str, Any]:
@@ -461,6 +575,125 @@ def _render_info_payload(payload: dict[str, Any], *, output_mode: str = "table")
         console.print(table)
 
 
+def _build_formats_payload(payload: dict[str, Any], *, target: str) -> dict[str, Any]:
+    if isinstance(payload.get("entries"), list):
+        raise InvalidInputError("Formats requires a single video target, not a playlist.")
+    raw_formats = payload.get("formats")
+    if not isinstance(raw_formats, list) or not raw_formats:
+        raise InvalidInputError("No downloadable formats were reported for this target.")
+
+    formats: list[dict[str, Any]] = []
+    for item in raw_formats:
+        if not isinstance(item, dict) or not item.get("format_id"):
+            continue
+        width = item.get("width")
+        height = item.get("height")
+        resolution = item.get("resolution")
+        if not resolution and width and height:
+            resolution = f"{width}x{height}"
+        formats.append(
+            {
+                "format_id": str(item["format_id"]),
+                "ext": str(item.get("ext") or ""),
+                "resolution": str(resolution or "audio only"),
+                "width": width if isinstance(width, int | float) else None,
+                "height": height if isinstance(height, int | float) else None,
+                "fps": item.get("fps") if isinstance(item.get("fps"), int | float) else None,
+                "vcodec": str(item.get("vcodec") or "none"),
+                "acodec": str(item.get("acodec") or "none"),
+                "filesize": item.get("filesize") or item.get("filesize_approx"),
+                "tbr": item.get("tbr") if isinstance(item.get("tbr"), int | float) else None,
+                "language": str(item.get("language") or ""),
+                "note": str(item.get("format_note") or ""),
+            }
+        )
+    if not formats:
+        raise InvalidInputError("No usable downloadable formats were reported for this target.")
+
+    presets = [
+        {
+            "name": "1080p",
+            "selector": "bv*[height<=1080]+ba/b[height<=1080]",
+            "description": "Best video up to 1080p with audio fallback.",
+        },
+        {
+            "name": "720p-small",
+            "selector": "bv*[height<=720]+ba/b[height<=720]",
+            "description": "Smaller HD video up to 720p.",
+        },
+        {
+            "name": "audio-m4a",
+            "selector": "ba[ext=m4a]/ba",
+            "description": "Prefer broadly compatible M4A audio.",
+        },
+        {
+            "name": "audio-opus",
+            "selector": "ba[acodec^=opus]/ba",
+            "description": "Prefer efficient Opus audio.",
+        },
+        {
+            "name": "archive-source",
+            "selector": "bv*+ba/b",
+            "description": "Best available source-quality video and audio.",
+        },
+    ]
+    return {
+        "type": "formats",
+        "video_id": str(payload.get("id") or ""),
+        "title": str(payload.get("title") or "Untitled"),
+        "webpage_url": str(payload.get("webpage_url") or target),
+        "formats": formats,
+        "presets": presets,
+    }
+
+
+def _render_formats_payload(payload: dict[str, Any], *, output_mode: str = "table") -> None:
+    mode = _normalize_output_mode(output_mode)
+    if mode == "json":
+        _print_json(payload)
+        return
+    formats = payload["formats"]
+    if mode == "plain":
+        _print_plain_rows(
+            [
+                ("format_id", "format_id"),
+                ("ext", "ext"),
+                ("resolution", "resolution"),
+                ("fps", "fps"),
+                ("vcodec", "vcodec"),
+                ("acodec", "acodec"),
+                ("filesize", "filesize"),
+                ("tbr", "tbr"),
+                ("note", "note"),
+            ],
+            formats,
+        )
+        return
+
+    table = Table(title=f"Formats: {sanitize_terminal_text(payload['title'])}")
+    for heading in ("ID", "Ext", "Resolution", "FPS", "Video", "Audio", "Size", "Note"):
+        table.add_column(heading)
+    for item in formats:
+        table.add_row(
+            sanitize_terminal_text(item["format_id"]),
+            sanitize_terminal_text(item["ext"]),
+            sanitize_terminal_text(item["resolution"]),
+            sanitize_terminal_text(item["fps"] or "-"),
+            sanitize_terminal_text(item["vcodec"]),
+            sanitize_terminal_text(item["acodec"]),
+            sanitize_terminal_text(item["filesize"] or "-"),
+            sanitize_terminal_text(item["note"] or "-"),
+        )
+    console.print(table)
+    preset_table = Table(title="Safe preset recommendations")
+    preset_table.add_column("Preset")
+    preset_table.add_column("Selector")
+    preset_table.add_column("Use")
+    for preset in payload["presets"]:
+        preset_table.add_row(preset["name"], preset["selector"], preset["description"])
+    console.print(preset_table)
+
+
 def _render_playlist_summary(
     payload: dict[str, Any],
     entry_count: int,
@@ -494,8 +727,10 @@ def _render_playlist_summary(
     console.print(table)
 
 
-def _render_doctor(settings: Settings, *, output_mode: str = "table") -> bool:
-    payload = _doctor_payload(settings)
+def _render_doctor(
+    settings: Settings, *, output_mode: str = "table", deep: bool = False
+) -> bool:
+    payload = _doctor_payload(settings, deep=deep)
     missing_required = any(tool["required"] and not tool["installed"] for tool in payload["tools"])
     mode = _normalize_output_mode(output_mode)
     if mode == "json":
@@ -514,6 +749,15 @@ def _render_doctor(settings: Settings, *, output_mode: str = "table") -> bool:
             )
         for key, value in payload["paths"].items():
             rows.append({"component": key, "status": "path", "value": value, "install_hint": ""})
+        for capability in payload.get("capabilities", []):
+            rows.append(
+                {
+                    "component": capability["name"],
+                    "status": capability["status"],
+                    "value": capability.get("version", ""),
+                    "install_hint": capability["detail"],
+                }
+            )
         _print_plain_rows(
             [
                 ("component", "component"),
@@ -551,6 +795,13 @@ def _render_doctor(settings: Settings, *, output_mode: str = "table") -> bool:
         )
     for key, value in payload["paths"].items():
         table.add_row(sanitize_terminal_text(key), "path", sanitize_terminal_text(value), "-")
+    for capability in payload.get("capabilities", []):
+        table.add_row(
+            sanitize_terminal_text(capability["name"]),
+            sanitize_terminal_text(capability["status"]),
+            sanitize_terminal_text(capability.get("version") or "-"),
+            sanitize_terminal_text(capability["detail"]),
+        )
     console.print(table)
     platform = sanitize_terminal_text(payload["support"]["platform"])
     status = sanitize_terminal_text(payload["support"]["status"])
@@ -1295,6 +1546,7 @@ __all__ = [
     "OUTPUT_MODES",
     "READ_OUTPUT_HELP",
     "_build_info_payload",
+    "_build_formats_payload",
     "_catalog_video_row",
     "_cleanup_payload",
     "_clip_grab_payload",
@@ -1326,6 +1578,7 @@ __all__ = [
     "_render_index_payload",
     "_render_index_summary",
     "_render_info_payload",
+    "_render_formats_payload",
     "_render_library_detail",
     "_render_library_remove_payload",
     "_render_library_rows",

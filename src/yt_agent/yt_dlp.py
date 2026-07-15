@@ -21,6 +21,7 @@ from yt_agent.models import DownloadTarget, VideoInfo
 from yt_agent.security import protect_private_tree
 
 _URL_RE = re.compile(r"https?://\S+")
+_SEARCH_TARGET_RE = re.compile(r"^(ytsearch(?:date)?\d*):", re.IGNORECASE)
 
 __all__ = [
     "YOUTUBE_ID_RE",
@@ -35,6 +36,8 @@ __all__ = [
     "resolve_payload",
     "resolve_targets",
     "download_target",
+    "fetch_comments",
+    "record_live",
 ]
 
 
@@ -105,9 +108,16 @@ def normalize_target(value: str) -> str:
     raise InvalidInputError("Target must be a full URL or an 11-character YouTube video id.")
 
 
-def _redact_command(command: str) -> str:
-    """Strip URLs and search queries from debug log lines."""
-    return _URL_RE.sub("<url>", command)
+def _redact_args(args: list[str]) -> str:
+    """Render command arguments for logs without targets or search text."""
+    redacted: list[str] = []
+    for arg in args:
+        search_target = _SEARCH_TARGET_RE.match(arg)
+        if search_target is not None:
+            redacted.append(f"{search_target.group(1)}:<query>")
+        else:
+            redacted.append(_URL_RE.sub("<url>", arg))
+    return shlex.join(redacted)
 
 
 def _bounded_stderr(value: str) -> str:
@@ -124,9 +134,9 @@ def _valid_subtitle_languages(value: str) -> bool:
 
 
 def _run_json(args: list[str]) -> dict[str, Any]:
-    command = shlex.join(args)
+    command = _redact_args(args)
     start_time = time.perf_counter()
-    logger.debug("Running subprocess: %s", _redact_command(command))
+    logger.debug("Running subprocess: %s", command)
     try:
         # Uses a resolved yt-dlp path and normalized arguments without invoking a shell.
         completed = subprocess.run(  # noqa: S603
@@ -141,7 +151,7 @@ def _run_json(args: list[str]) -> dict[str, Any]:
         "Subprocess completed returncode=%s elapsed_ms=%.2f command=%s",
         completed.returncode,
         elapsed_ms,
-        _redact_command(command),
+        command,
     )
     if completed.returncode != 0:
         stderr = _bounded_stderr(completed.stderr)
@@ -154,13 +164,13 @@ def _run_json(args: list[str]) -> dict[str, Any]:
 
 
 def _run_download(args: list[str]) -> DownloadExecution | None:
-    command = shlex.join(args)
+    command = _redact_args(args)
     start_time = time.perf_counter()
-    logger.debug("Running subprocess: %s", _redact_command(command))
+    logger.debug("Running subprocess: %s", command)
     try:
         # Uses a resolved yt-dlp path and normalized arguments without invoking a shell.
         completed = subprocess.run(  # noqa: S603
-            args, text=True, capture_output=True, check=False, timeout=_SUBPROCESS_TIMEOUT_SECONDS
+            args, text=True, capture_output=True, check=False
         )
     except subprocess.TimeoutExpired as exc:
         elapsed_ms = (time.perf_counter() - start_time) * 1000
@@ -171,7 +181,7 @@ def _run_download(args: list[str]) -> DownloadExecution | None:
         "Subprocess completed returncode=%s elapsed_ms=%.2f command=%s",
         completed.returncode,
         elapsed_ms,
-        _redact_command(command),
+        command,
     )
     if completed.returncode != 0:
         stderr = _bounded_stderr(completed.stderr)
@@ -199,6 +209,25 @@ def fetch_info(target: str) -> dict[str, Any]:
     yt_dlp = command_path()
     normalized = normalize_target(target)
     return _run_json([yt_dlp, "--dump-single-json", "--no-warnings", normalized])
+
+
+def fetch_comments(target: str, *, limit: int) -> dict[str, Any]:
+    """Fetch a bounded comment payload without accepting raw extractor arguments."""
+    if limit < 1 or limit > 1000:
+        raise InvalidInputError("Comment limit must be between 1 and 1000.")
+    yt_dlp = command_path()
+    normalized = normalize_target(target)
+    return _run_json(
+        [
+            yt_dlp,
+            "--dump-single-json",
+            "--no-warnings",
+            "--get-comments",
+            "--extractor-args",
+            f"youtube:max_comments={limit}",
+            normalized,
+        ]
+    )
 
 
 def resolve_payload(
@@ -252,6 +281,8 @@ def download_target(
     mode: str = "video",
     fetch_subs: bool = False,
     auto_subs: bool = False,
+    sponsorblock: bool = False,
+    sponsorblock_remove: bool = False,
 ) -> DownloadExecution | None:
     yt_dlp = command_path()
 
@@ -298,6 +329,13 @@ def download_target(
             args.append("--write-auto-subs")
         args.extend(["--sub-langs", settings.subtitle_languages])
 
+    if sponsorblock_remove:
+        args.extend(["--sponsorblock-remove", "all"])
+    elif sponsorblock:
+        # Mark-only is deliberately the default; destructive removal requires
+        # the separate explicit sponsorblock_remove flag.
+        args.extend(["--sponsorblock-mark", "all"])
+
     args.append(normalize_target(target.info.webpage_url))
     execution = _run_download(args)
     if execution is None:
@@ -312,6 +350,53 @@ def download_target(
         ) from exc
     protect_private_tree(execution.output_path.parent)
 
+    return DownloadExecution(
+        output_path=execution.output_path,
+        stdout=execution.stdout,
+        info_json_path=discover_info_json(execution.output_path),
+    )
+
+
+def record_live(
+    target: DownloadTarget,
+    settings: Settings,
+    *,
+    live_from_start: bool = True,
+    wait_seconds: int = 0,
+) -> DownloadExecution:
+    """Record one live stream with bounded, typed live options."""
+    if not 0 <= wait_seconds <= 86_400:
+        raise InvalidInputError("Live wait seconds must be between 0 and 86400.")
+    if not _FORMAT_ALLOWLIST_RE.fullmatch(settings.video_format):
+        raise InvalidInputError("Invalid characters in video_format.")
+    output_template = build_output_template(settings.download_root, target.info)
+    args = [
+        command_path(),
+        "--quiet",
+        "--no-warnings",
+        "--print",
+        "after_move:filepath",
+        "--output",
+        str(output_template),
+        "--download-archive",
+        str(settings.archive_file),
+        "--format",
+        settings.video_format,
+        "--write-info-json",
+    ]
+    if live_from_start:
+        args.append("--live-from-start")
+    if wait_seconds:
+        args.extend(["--wait-for-video", str(wait_seconds)])
+    args.append(normalize_target(target.info.webpage_url))
+    execution = _run_download(args)
+    if execution is None:
+        raise ExternalCommandError("yt-dlp did not produce a live recording.")
+    try:
+        execution.output_path.resolve().relative_to(settings.download_root.resolve())
+    except ValueError as exc:
+        raise InvalidInputError("Live output path is outside the download root directory.") from exc
+    protect_private_tree(execution.output_path.parent)
     return DownloadExecution(
         output_path=execution.output_path,
         stdout=execution.stdout,

@@ -6,6 +6,32 @@ The format is inspired by Keep a Changelog, and this project follows pre-1.0 sem
 
 ## [Unreleased]
 
+### Added
+
+- Deep runtime diagnostics, normalized format inspection, live recording, and safe `open`/`play`.
+- Versioned catalog migrations plus backup/restore for core indexed content, comments, and
+  user-owned curation records.
+- Library verification, safe repair previews, saved-source sync, and a persistent synchronous
+  queue with bounded retries and interrupted-worker recovery.
+- Transcript export/local whisper generation, bounded comment FTS, smart clip boundaries, and
+  contact-sheet/GIF previews.
+- Notes, ratings, tags, collections, and timestamp bookmarks with deterministic local search.
+
+### Fixed
+
+- Preserved local paths and richer nullable metadata during remote re-indexing.
+- Made chapter, transcript, and playlist refresh authoritative only after their source was
+  inspected, and made fallback playlist IDs deterministic.
+- Prevented transcript context from crossing subtitle tracks, stale subtitle-cache contamination,
+  non-finite clip ranges, archive-key case mismatches, and query leakage in verbose logs.
+
+### Changed
+
+- Long downloads no longer inherit the metadata extraction timeout.
+- The TUI now includes pagination and actionable queue/download controls rather than being a
+  read-mostly catalog browser.
+- Semantic search remains future/optional; deterministic local FTS is still the default.
+
 ## [0.3.0] - 2026-03-14
 
 ### Added
