@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - "codex/**"
   pull_request:
 
 permissions:
@@ -85,11 +84,27 @@ jobs:
       - name: Type check
         run: uv run mypy
       - name: Test
-        run: uv run pytest --cov --cov-report=term-missing
+        run: uv run pytest -m "not slow" --cov --cov-report=term-missing
       - name: CLI Smoke
         run: |
           uv run yt-agent --version
           uv run yt-agent --help
+
+  benchmark:
+    name: Catalog Benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+      - name: Install uv
+        uses: astral-sh/setup-uv@e06108dd0aef18192324c70427afc47652e63a82 # v7.5.0
+      - name: Sync
+        run: uv sync --dev
+      - name: Benchmark
+        run: uv run pytest -m slow -q
+
   build:
     name: Build
     runs-on: ubuntu-latest
