@@ -12,7 +12,9 @@ TEXT = st.text(alphabet=st.characters(blacklist_categories=("Cs",)), max_size=80
 
 
 def _sanitized_tokens(query: str) -> list[str]:
-    return [re.sub(r"[^\w\-]", "", token) for token in query.split() if re.sub(r"[^\w\-]", "", token)]
+    return [
+        re.sub(r"[^\w\-]", "", token) for token in query.split() if re.sub(r"[^\w\-]", "", token)
+    ]
 
 
 @given(query=TEXT)

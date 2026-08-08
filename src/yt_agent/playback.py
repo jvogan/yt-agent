@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,11 @@ def launch_media(
                 raise InvalidInputError("Playback start must not be negative.")
             args.append(f"--start={start_seconds:.3f}")
         args.extend(["--", target])
+    elif sys.platform == "win32":
+        args = ["startfile", target]
+        if not dry_run:
+            os.startfile(target)  # type: ignore[attr-defined]  # noqa: S606
+        return args
     else:
         opener = "open" if sys.platform == "darwin" else "xdg-open"
         opener_path = shutil.which(opener)

@@ -233,17 +233,13 @@ def test_backup_create_and_restore_commands_round_trip(
     backup_path = tmp_path / "backup.json"
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
 
-    created = runner.invoke(
-        app, ["backup", "create", str(backup_path), "--output", "json"]
-    )
+    created = runner.invoke(app, ["backup", "create", str(backup_path), "--output", "json"])
     assert created.exit_code == 0, created.output
     assert backup_path.is_file()
     assert json.loads(created.stdout)["summary"]["transcript_segments"] == 1
 
     store.clear()
-    restored = runner.invoke(
-        app, ["backup", "restore", str(backup_path), "--output", "json"]
-    )
+    restored = runner.invoke(app, ["backup", "restore", str(backup_path), "--output", "json"])
     assert restored.exit_code == 0, restored.output
     assert json.loads(restored.stdout)["summary"]["dry_run"] is False
     assert CatalogStore(settings.catalog_file).get_video("abc123def45") is not None

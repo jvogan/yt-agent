@@ -37,7 +37,9 @@ def _target() -> DownloadTarget:
     return DownloadTarget(original_input=info.webpage_url, info=info)
 
 
-def _upsert_video(catalog: CatalogStore, info: VideoInfo, *, requested_input: str | None = None) -> None:
+def _upsert_video(
+    catalog: CatalogStore, info: VideoInfo, *, requested_input: str | None = None
+) -> None:
     catalog.upsert_video(
         VideoUpsert(
             video_id=info.video_id,
@@ -82,7 +84,9 @@ def test_index_refresh_backfills_from_manifest_and_sidecars(settings) -> None:
         encoding="utf-8",
     )
 
-    record = ManifestRecord.from_download(_target(), output_path=output_path, info_json_path=info_json_path)
+    record = ManifestRecord.from_download(
+        _target(), output_path=output_path, info_json_path=info_json_path
+    )
     append_manifest_record(settings.manifest_file, record)
 
     summary = index_refresh(settings)
@@ -133,7 +137,9 @@ def test_split_languages_prefers_override_and_filters_empty_values(settings) -> 
     assert _split_languages(custom_settings, override=" es , , de ,, ") == ["es", "de"]
 
 
-def test_index_transcripts_fetches_remote_sidecars_and_skips_missing_files(settings, monkeypatch) -> None:
+def test_index_transcripts_fetches_remote_sidecars_and_skips_missing_files(
+    settings, monkeypatch
+) -> None:
     import yt_agent.indexer as indexer
 
     catalog = CatalogStore(settings.catalog_file)
@@ -166,7 +172,9 @@ def test_index_transcripts_fetches_remote_sidecars_and_skips_missing_files(setti
     missing_subtitle = cache_root / f"{info.video_id}.fr.vtt"
     fetch_calls: list[dict[str, object]] = []
 
-    def fake_fetch_subtitle_sidecars(target: str, destination: Path, *, languages: list[str], allow_auto_subs: bool):
+    def fake_fetch_subtitle_sidecars(
+        target: str, destination: Path, *, languages: list[str], allow_auto_subs: bool
+    ):
         fetch_calls.append(
             {
                 "target": target,
@@ -210,7 +218,9 @@ def test_index_transcripts_fetches_remote_sidecars_and_skips_missing_files(setti
     assert [segment.text for segment in details["transcript_preview"]] == ["manual line"]
 
 
-def test_index_manifest_record_discovers_info_json_when_record_path_is_missing(settings, monkeypatch) -> None:
+def test_index_manifest_record_discovers_info_json_when_record_path_is_missing(
+    settings, monkeypatch
+) -> None:
     import yt_agent.indexer as indexer
 
     output_path = settings.download_root / "Channel" / "manifest-only.mp4"
@@ -266,7 +276,10 @@ def test_index_manifest_record_discovers_info_json_when_record_path_is_missing(s
 
 def test_playlist_id_from_payload_prefers_explicit_ids_and_falls_back_to_stable_hash() -> None:
     assert _playlist_id_from_payload({"id": "PL123"}, "https://example.com/playlist") == "PL123"
-    assert _playlist_id_from_payload({"playlist_id": "PL456"}, "https://example.com/playlist") == "PL456"
+    assert (
+        _playlist_id_from_payload({"playlist_id": "PL456"}, "https://example.com/playlist")
+        == "PL456"
+    )
     assert _playlist_id_from_payload({}, "https://example.com/playlist") == (
         "playlist:515973fb4c6b1f8ed981ef7d"
     )
@@ -310,7 +323,9 @@ def test_index_refresh_authoritatively_removes_deleted_chapters_and_transcripts(
     assert summary.transcript_segments == 0
 
 
-def test_index_target_does_not_clear_uninspected_chapters_or_transcripts(settings, monkeypatch) -> None:
+def test_index_target_does_not_clear_uninspected_chapters_or_transcripts(
+    settings, monkeypatch
+) -> None:
     import yt_agent.indexer as indexer
 
     store = CatalogStore(settings.catalog_file)
@@ -360,7 +375,9 @@ def test_index_target_does_not_clear_uninspected_chapters_or_transcripts(setting
     assert len(details["subtitle_tracks"]) == 1
 
 
-def test_index_target_indexes_playlist_entries_and_preserves_positions(settings, monkeypatch) -> None:
+def test_index_target_indexes_playlist_entries_and_preserves_positions(
+    settings, monkeypatch
+) -> None:
     import yt_agent.indexer as indexer
 
     playlist_payload = {
@@ -421,12 +438,12 @@ def test_index_target_indexes_playlist_entries_and_preserves_positions(settings,
         refreshed_entries = conn.execute(
             "SELECT video_id, position FROM playlist_entries ORDER BY position"
         ).fetchall()
-    assert [(row["video_id"], row["position"]) for row in refreshed_entries] == [
-        ("video-two", 1)
-    ]
+    assert [(row["video_id"], row["position"]) for row in refreshed_entries] == [("video-two", 1)]
 
 
-def test_index_target_indexes_single_video_payload_without_playlist_entry(settings, monkeypatch) -> None:
+def test_index_target_indexes_single_video_payload_without_playlist_entry(
+    settings, monkeypatch
+) -> None:
     import yt_agent.indexer as indexer
 
     video_payload = {

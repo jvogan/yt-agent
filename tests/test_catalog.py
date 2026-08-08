@@ -1,4 +1,7 @@
+import os
 import sqlite3
+import stat
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -16,7 +19,7 @@ from yt_agent.models import ChapterEntry, SubtitleTrack, TranscriptSegment
 
 ADVERSARIAL_LONG_TOKEN = "x" * 1001
 ADVERSARIAL_CJK = "\u4e16\u754c"
-ADVERSARIAL_EMOJI = "\U0001F600"
+ADVERSARIAL_EMOJI = "\U0001f600"
 ADVERSARIAL_RTL = "\u05e9\u05dc\u05d5\u05dd"
 ADVERSARIAL_COMBINING = "Cafe\u0301"
 ADVERSARIAL_VIDEO_ID = "adv123fts45"
@@ -32,6 +35,23 @@ def test_catalog_connection_context_closes_handle(tmp_path: Path) -> None:
 
     with pytest.raises(sqlite3.ProgrammingError, match="closed"):
         conn.execute("SELECT 1")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission semantics")
+def test_catalog_rehardens_recreated_write_path(tmp_path: Path) -> None:
+    path = tmp_path / "catalog.sqlite"
+    store = CatalogStore(path)
+    store.initialize()
+    path.unlink()
+
+    recreated = sqlite3.connect(path)
+    recreated.close()
+    path.chmod(0o644)
+
+    with store.connect() as conn:
+        conn.execute("SELECT 1")
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 def test_catalog_indexes_and_queries_video(tmp_path: Path) -> None:
@@ -130,9 +150,7 @@ def test_transcript_context_and_preview_stay_with_one_track(tmp_path: Path) -> N
         ],
     )
 
-    search_hit = store.search_clips(
-        "needle", source="transcript", language="en", limit=1
-    )[0]
+    search_hit = store.search_clips("needle", source="transcript", language="en", limit=1)[0]
     hit = store.get_clip_hit(search_hit.result_id)
 
     assert hit is not None
@@ -194,9 +212,10 @@ def test_list_and_search_videos_support_database_pagination(tmp_path: Path) -> N
         "page-video-2",
         "page-video-1",
     ]
-    assert [
-        video.video_id for video in store.search_videos("Paged", limit=2, offset=3)
-    ] == ["page-video-1", "page-video-0"]
+    assert [video.video_id for video in store.search_videos("Paged", limit=2, offset=3)] == [
+        "page-video-1",
+        "page-video-0",
+    ]
 
 
 def test_fresh_catalog_records_current_schema_version(tmp_path: Path) -> None:
@@ -211,7 +230,7 @@ def test_fresh_catalog_records_current_schema_version(tmp_path: Path) -> None:
 
 def test_unversioned_catalog_upgrades_without_losing_data(tmp_path: Path) -> None:
     path = tmp_path / "legacy.sqlite"
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         conn.executescript(SCHEMA)
         conn.execute(
             """
@@ -241,25 +260,25 @@ def test_unversioned_catalog_upgrades_without_losing_data(tmp_path: Path) -> Non
 
 
 def test_migration_sequence_rolls_back_atomically_on_failure() -> None:
-    conn = sqlite3.connect(":memory:")
-    migrations = (
-        "CREATE TABLE migration_marker (value TEXT);",
-        "INSERT INTO table_that_does_not_exist VALUES (1);",
-    )
+    with closing(sqlite3.connect(":memory:")) as conn:
+        migrations = (
+            "CREATE TABLE migration_marker (value TEXT);",
+            "INSERT INTO table_that_does_not_exist VALUES (1);",
+        )
 
-    with pytest.raises(sqlite3.OperationalError):
-        _apply_migrations(conn, current_version=0, migrations=migrations)
+        with pytest.raises(sqlite3.OperationalError):
+            _apply_migrations(conn, current_version=0, migrations=migrations)
 
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
-    marker = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'migration_marker'"
-    ).fetchone()
-    assert marker is None
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
+        marker = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'migration_marker'"
+        ).fetchone()
+        assert marker is None
 
 
 def test_catalog_rejects_schema_versions_from_newer_releases(tmp_path: Path) -> None:
     path = tmp_path / "future.sqlite"
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         conn.execute(f"PRAGMA user_version = {CATALOG_SCHEMA_VERSION + 1}")
 
     with pytest.raises(sqlite3.DatabaseError, match="newer than supported"):
@@ -598,10 +617,17 @@ def test_delete_video_removes_video_and_fts_entries(tmp_path: Path) -> None:
         [
             (
                 SubtitleTrack(
-                    lang="en", source="manual", is_auto=False, format="vtt",
+                    lang="en",
+                    source="manual",
+                    is_auto=False,
+                    format="vtt",
                     file_path=tmp_path / "demo.en.vtt",
                 ),
-                [TranscriptSegment(segment_index=0, start_seconds=0.0, end_seconds=5.0, text="hello world")],
+                [
+                    TranscriptSegment(
+                        segment_index=0, start_seconds=0.0, end_seconds=5.0, text="hello world"
+                    )
+                ],
             )
         ],
     )

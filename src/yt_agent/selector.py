@@ -19,7 +19,6 @@ __all__ = [
 ]
 
 
-
 def _format_line(index: int, result: VideoInfo) -> str:
     return "\t".join(
         [

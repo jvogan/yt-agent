@@ -6,6 +6,7 @@ import json
 import shutil
 import sqlite3
 import subprocess
+from contextlib import closing
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -343,7 +344,7 @@ def _audit_catalog(
         return 0, 0
 
     uri = f"file:{quote(str(settings.catalog_file.resolve()))}?mode=ro"
-    with sqlite3.connect(uri, uri=True) as conn:
+    with closing(sqlite3.connect(uri, uri=True)) as conn:
         tables = _existing_tables(conn)
         if "videos" not in tables:
             _finding(

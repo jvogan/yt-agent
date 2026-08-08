@@ -23,7 +23,7 @@ def _video() -> VideoInfo:
 
 
 def test_sanitize_component_normalizes_reserved_characters() -> None:
-    assert sanitize_component('hello:/world*', "fallback") == "hello world"
+    assert sanitize_component("hello:/world*", "fallback") == "hello world"
 
 
 def test_sanitize_component_suffixes_windows_reserved_names() -> None:

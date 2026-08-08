@@ -105,9 +105,7 @@ def _download_targets(
                 markup=False,
             )
         if events:
-            events.emit(
-                "download.started", video_id=target.info.video_id, title=target.info.title
-            )
+            events.emit("download.started", video_id=target.info.video_id, title=target.info.title)
         try:
             execution = yt_dlp.download_target(
                 target,
@@ -216,9 +214,7 @@ def _download_targets(
                     markup=False,
                 )
             if events:
-                events.emit(
-                    "index.failed", video_id=target.info.video_id, message=str(exc)
-                )
+                events.emit("index.failed", video_id=target.info.video_id, message=str(exc))
         items.append(item)
     return items
 

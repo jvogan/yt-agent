@@ -30,7 +30,10 @@ def test_normalize_target_rejects_free_form_text() -> None:
 
 def test_normalize_target_accepts_youtube_hosts() -> None:
     assert normalize_target("https://youtu.be/abc123def45") == "https://youtu.be/abc123def45"
-    assert normalize_target("https://music.youtube.com/watch?v=abc123def45") == "https://music.youtube.com/watch?v=abc123def45"
+    assert (
+        normalize_target("https://music.youtube.com/watch?v=abc123def45")
+        == "https://music.youtube.com/watch?v=abc123def45"
+    )
 
 
 def test_normalize_target_accepts_casefolded_and_trailing_dot_hosts() -> None:
@@ -63,10 +66,17 @@ def test_normalize_target_rejects_lookalike_suffix_hosts() -> None:
         normalize_target("https://youtube.com.evil.com/watch?v=abc123def45")
 
 
+def test_normalize_target_rejects_malformed_url() -> None:
+    with pytest.raises(InvalidInputError, match="valid YouTube URL"):
+        normalize_target("https://[")
+
+
 def test_command_path_raises_when_yt_dlp_is_missing(monkeypatch) -> None:
     monkeypatch.setattr("yt_agent.yt_dlp.shutil.which", lambda _: None)
 
-    with pytest.raises(DependencyError, match="Required tool 'yt-dlp' is not installed or not on PATH."):
+    with pytest.raises(
+        DependencyError, match="Required tool 'yt-dlp' is not installed or not on PATH."
+    ):
         command_path()
 
 
@@ -346,7 +356,9 @@ def test_download_target_fetch_subs_appends_write_subs(monkeypatch, tmp_path) ->
     assert "--sub-langs" in args
 
 
-def test_download_target_auto_subs_keeps_manual_subs_and_adds_auto_fallback(monkeypatch, tmp_path) -> None:
+def test_download_target_auto_subs_keeps_manual_subs_and_adds_auto_fallback(
+    monkeypatch, tmp_path
+) -> None:
     settings = _make_settings(tmp_path)
     captured: list[list[str]] = []
 
@@ -387,8 +399,7 @@ def test_download_target_sponsorblock_marks_by_default(monkeypatch, tmp_path) ->
     monkeypatch.setattr(
         "yt_agent.yt_dlp.subprocess.run",
         lambda args, **kwargs: (
-            captured.extend(args)
-            or subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            captured.extend(args) or subprocess.CompletedProcess(args, 0, stdout="", stderr="")
         ),
     )
 
@@ -404,8 +415,7 @@ def test_download_target_sponsorblock_removal_is_explicit(monkeypatch, tmp_path)
     monkeypatch.setattr(
         "yt_agent.yt_dlp.subprocess.run",
         lambda args, **kwargs: (
-            captured.extend(args)
-            or subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            captured.extend(args) or subprocess.CompletedProcess(args, 0, stdout="", stderr="")
         ),
     )
 
@@ -485,9 +495,7 @@ def test_record_live_uses_only_typed_live_options(monkeypatch, tmp_path) -> None
     monkeypatch.setattr("yt_agent.yt_dlp.shutil.which", lambda _: "/usr/bin/yt-dlp")
     monkeypatch.setattr("yt_agent.yt_dlp.subprocess.run", fake_run)
 
-    execution = record_live(
-        _make_target(), settings, live_from_start=True, wait_seconds=30
-    )
+    execution = record_live(_make_target(), settings, live_from_start=True, wait_seconds=30)
 
     assert execution.output_path == output_path
     args = calls[0]

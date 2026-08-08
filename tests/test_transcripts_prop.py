@@ -37,9 +37,13 @@ def test_parse_subtitle_file_handles_arbitrary_vtt_content(content: str) -> None
     assert all(segment.text for segment in segments)
 
 
-@given(cue_bodies=st.lists(st.lists(NON_BLANK_LINE, min_size=1, max_size=3), min_size=1, max_size=8))
+@given(
+    cue_bodies=st.lists(st.lists(NON_BLANK_LINE, min_size=1, max_size=3), min_size=1, max_size=8)
+)
 @settings(deadline=None)
-def test_parse_subtitle_file_skips_bad_vtt_blocks_and_keeps_valid_cues(cue_bodies: list[list[str]]) -> None:
+def test_parse_subtitle_file_skips_bad_vtt_blocks_and_keeps_valid_cues(
+    cue_bodies: list[list[str]],
+) -> None:
     blocks: list[str] = []
     expected_texts: list[str] = []
 

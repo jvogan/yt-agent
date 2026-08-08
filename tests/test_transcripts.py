@@ -12,7 +12,9 @@ from yt_agent.transcripts import (
 )
 
 
-def test_parse_subtitle_file_reads_vtt_with_identifiers_tags_and_skips_empty_blocks(tmp_path: Path) -> None:
+def test_parse_subtitle_file_reads_vtt_with_identifiers_tags_and_skips_empty_blocks(
+    tmp_path: Path,
+) -> None:
     subtitle_path = tmp_path / "demo.vtt"
     subtitle_path.write_text(
         "\n".join(
@@ -47,7 +49,9 @@ def test_parse_subtitle_file_reads_vtt_with_identifiers_tags_and_skips_empty_blo
     ]
 
 
-def test_parse_subtitle_file_reads_srt_in_both_common_layouts_and_skips_bad_entries(tmp_path: Path) -> None:
+def test_parse_subtitle_file_reads_srt_in_both_common_layouts_and_skips_bad_entries(
+    tmp_path: Path,
+) -> None:
     subtitle_path = tmp_path / "demo.srt"
     subtitle_path.write_text(
         "\n".join(
@@ -141,13 +145,22 @@ def test_fetch_subtitle_sidecars_returns_manual_results_without_auto_retry(
         )
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("yt_agent.transcripts.ensure_private_directory", lambda path: destination.mkdir(exist_ok=True))
-    monkeypatch.setattr("yt_agent.transcripts.protect_private_tree", lambda path: protected.append(path))
+    monkeypatch.setattr(
+        "yt_agent.transcripts.ensure_private_directory",
+        lambda path: destination.mkdir(exist_ok=True),
+    )
+    monkeypatch.setattr(
+        "yt_agent.transcripts.protect_private_tree", lambda path: protected.append(path)
+    )
     monkeypatch.setattr("yt_agent.transcripts.command_path", lambda: "/usr/bin/yt-dlp")
-    monkeypatch.setattr("yt_agent.transcripts.normalize_target", lambda target: f"normalized:{target}")
+    monkeypatch.setattr(
+        "yt_agent.transcripts.normalize_target", lambda target: f"normalized:{target}"
+    )
     monkeypatch.setattr("yt_agent.transcripts.subprocess.run", fake_run)
 
-    info_json, paths = fetch_subtitle_sidecars("abc123def45", destination, languages=["en", "fr"], allow_auto_subs=False)
+    info_json, paths = fetch_subtitle_sidecars(
+        "abc123def45", destination, languages=["en", "fr"], allow_auto_subs=False
+    )
 
     assert info_json == destination / "abc123def45.info.json"
     assert paths == [destination / "abc123def45.en.vtt"]

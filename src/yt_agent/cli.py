@@ -918,9 +918,7 @@ def import_catalog(
     _run_guarded(_command, output_mode=output)
 
 
-@backup_app.command(
-    "create", help="Back up core indexed content, comments, and user curation."
-)
+@backup_app.command("create", help="Back up core indexed content, comments, and user curation.")
 def backup_create_command(
     dest: Path = typer.Argument(..., help="Destination JSON backup file."),
     force: bool = typer.Option(False, "--force", help="Overwrite an existing backup file."),
@@ -1405,9 +1403,7 @@ def comments_search(
         if mode == "plain":
             for row in rows:
                 console.print(
-                    sanitize_terminal_text(
-                        f"{row['video_id']}\t{row['author']}\t{row['text']}"
-                    ),
+                    sanitize_terminal_text(f"{row['video_id']}\t{row['author']}\t{row['text']}"),
                     markup=False,
                 )
             return
@@ -1589,6 +1585,16 @@ def live_record_command(
 def _resolve_playback_reference(
     settings: Settings, reference: str
 ) -> tuple[str | Path, float | None]:
+    def _catalog_media_path(path: Path) -> Path:
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(settings.download_root.resolve())
+        except ValueError as exc:
+            raise InvalidInputError(
+                "Catalog media path is outside the configured download root."
+            ) from exc
+        return resolved
+
     path = Path(reference).expanduser()
     if path.exists():
         return path, None
@@ -1598,12 +1604,12 @@ def _resolve_playback_reference(
         if hit is None:
             raise InvalidInputError(f"Unknown clip result '{reference}'.")
         if hit.output_path is not None and hit.output_path.exists():
-            return hit.output_path, hit.start_seconds
+            return _catalog_media_path(hit.output_path), hit.start_seconds
         separator = "&" if "?" in hit.webpage_url else "?"
         return f"{hit.webpage_url}{separator}t={int(hit.start_seconds)}", None
     video = store.get_video(reference)
     if video is not None and video.output_path is not None and video.output_path.exists():
-        return video.output_path, None
+        return _catalog_media_path(video.output_path), None
     return reference, None
 
 
@@ -2902,9 +2908,7 @@ def stats_trends_command(
         from yt_agent.stats import stats_trends, trend_payload
 
         settings = _load_settings(config)
-        trends = stats_trends(
-            _catalog(settings, readonly=True), video_ids, limit=limit
-        )
+        trends = stats_trends(_catalog(settings, readonly=True), video_ids, limit=limit)
         rows = [trend_payload(trend) for trend in trends]
         mode = _normalize_output_mode(output)
         if mode == "json":

@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -35,13 +36,13 @@ def _store(tmp_path: Path) -> tuple[CatalogStore, CurationStore]:
 
 def test_version_one_catalog_migrates_to_curation_schema(tmp_path: Path) -> None:
     path = tmp_path / "legacy.sqlite"
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         conn.executescript(SCHEMA)
         conn.execute("PRAGMA user_version = 1")
 
     CatalogStore(path).ensure_schema()
 
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == CATALOG_SCHEMA_VERSION
         tables = {
             row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")

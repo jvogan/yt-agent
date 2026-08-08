@@ -27,7 +27,6 @@ __all__ = [
 ]
 
 
-
 @dataclass(frozen=True)
 class IndexSummary:
     """User-facing summary of indexing work."""

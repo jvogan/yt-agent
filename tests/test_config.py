@@ -38,6 +38,14 @@ def test_load_settings_rejects_unknown_key(tmp_path: Path) -> None:
         load_settings(config_path)
 
 
+def test_load_settings_wraps_invalid_toml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("download_root = [\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="invalid TOML"):
+        load_settings(config_path)
+
+
 def test_load_settings_accepts_audio_default_mode(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text('default_mode = "audio"\n', encoding="utf-8")
@@ -125,7 +133,7 @@ def test_load_settings_env_languages_overrides_toml(
 def test_load_settings_ignores_unset_env_vars(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(
-        '\n'.join(
+        "\n".join(
             [
                 f'download_root = "{tmp_path / "from-toml"}"',
                 'audio_format = "best"',

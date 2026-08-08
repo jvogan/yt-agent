@@ -29,7 +29,6 @@ __all__ = [
 ]
 
 
-
 @dataclass(frozen=True)
 class DefaultPaths:
     config_path: Path
@@ -207,8 +206,11 @@ def load_settings(
     resolved_config_path = _expand_path(config_path or defaults.config_path)
     values: dict[str, Any] = {}
     if resolved_config_path.exists():
-        with resolved_config_path.open("rb") as handle:
-            parsed = tomllib.load(handle)
+        try:
+            with resolved_config_path.open("rb") as handle:
+                parsed = tomllib.load(handle)
+        except tomllib.TOMLDecodeError as exc:
+            raise ConfigError(f"Config file contains invalid TOML: {exc}") from exc
         if not isinstance(parsed, dict):
             raise ConfigError("Config file must contain a TOML table.")
         values = parsed

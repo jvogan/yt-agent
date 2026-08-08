@@ -56,7 +56,7 @@ ALLOWED_YOUTUBE_HOSTS = {
 }
 logger = logging.getLogger("yt_agent")
 
-# Finding 1: Allowlists for config values passed to yt-dlp CLI arguments.
+# Allowlisted config values passed to yt-dlp CLI arguments.
 _FORMAT_ALLOWLIST_RE = re.compile(r"^[A-Za-z0-9+*/\[\],._()\- ]+$")
 _SUBTITLE_LANG_RE = re.compile(r"^[A-Za-z0-9,.*\- ]+$")
 
@@ -94,8 +94,11 @@ def normalize_target(value: str) -> str:
     if not stripped:
         raise InvalidInputError("Target cannot be empty.")
     if stripped.startswith(("http://", "https://")):
-        parsed = urlsplit(stripped)
-        host = (parsed.hostname or "").rstrip(".").casefold()
+        try:
+            parsed = urlsplit(stripped)
+            host = (parsed.hostname or "").rstrip(".").casefold()
+        except ValueError as exc:
+            raise InvalidInputError("Target must be a valid YouTube URL.") from exc
         if (
             host not in ALLOWED_YOUTUBE_HOSTS
             and not host.endswith(".youtube.com")
@@ -188,9 +191,7 @@ def _run_download(args: list[str]) -> DownloadExecution | None:
         raise ExternalCommandError("yt-dlp download failed.", stderr=stderr)
 
     lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
-    output_path = next(
-        (Path(line) for line in reversed(lines) if not line.startswith("[")), None
-    )
+    output_path = next((Path(line) for line in reversed(lines) if not line.startswith("[")), None)
     if output_path is None:
         return None  # yt-dlp exited 0 with no output — archive skip
     return DownloadExecution(output_path=output_path, stdout=completed.stdout)

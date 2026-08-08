@@ -67,9 +67,7 @@ def _normalize_comments(payload: dict[str, Any], limit: int) -> list[CommentUpse
         author = sanitize_terminal_text(raw.get("author") or "Unknown")[:500]
         raw_id = sanitize_terminal_text(raw.get("id") or "")[:512]
         if not raw_id:
-            digest = hashlib.sha256(
-                f"{author}\0{text}\0{position}".encode()
-            ).hexdigest()[:24]
+            digest = hashlib.sha256(f"{author}\0{text}\0{position}".encode()).hexdigest()[:24]
             raw_id = f"generated:{digest}"
         if raw_id in seen:
             continue

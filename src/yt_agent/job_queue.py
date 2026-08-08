@@ -32,6 +32,7 @@ class _ClosingConnection(sqlite3.Connection):
         finally:
             self.close()
 
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
     job_id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -15,7 +15,6 @@ __all__ = [
 ]
 
 
-
 def ensure_manifest_file(path: Path) -> None:
     ensure_private_file(path)
 

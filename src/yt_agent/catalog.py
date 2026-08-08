@@ -55,6 +55,7 @@ class _ClosingConnection(sqlite3.Connection):
         finally:
             self.close()
 
+
 SCHEMA = """
 PRAGMA foreign_keys = ON;
 
@@ -377,9 +378,7 @@ def _apply_migrations(
         return
 
     statements = ["BEGIN IMMEDIATE;"]
-    for version, migration in enumerate(
-        migrations[current_version:], start=current_version + 1
-    ):
+    for version, migration in enumerate(migrations[current_version:], start=current_version + 1):
         statements.append(migration)
         statements.append(f"PRAGMA user_version = {version};")
     statements.append("COMMIT;")
@@ -404,7 +403,6 @@ class CatalogStore:
     def __init__(self, path: Path, *, readonly: bool = False) -> None:
         self.path = path
         self.readonly = readonly
-        self._write_path_ready = False
 
     def connect(self, *, readonly: bool | None = None) -> sqlite3.Connection:
         effective_readonly = self.readonly if readonly is None else readonly
@@ -417,11 +415,7 @@ class CatalogStore:
                 factory=_ClosingConnection,
             )
         else:
-            if not self._write_path_ready:
-                ensure_private_file(self.path)
-                self._write_path_ready = True
-            elif self.path.is_symlink():
-                raise OSError(f"Refusing to operate on symlink: {self.path}")
+            ensure_private_file(self.path)
             conn = sqlite3.connect(self.path, factory=_ClosingConnection)
             conn.execute("PRAGMA synchronous = NORMAL")
         conn.row_factory = sqlite3.Row
@@ -661,10 +655,7 @@ class CatalogStore:
                 INSERT INTO playlist_entries (playlist_id, video_id, position)
                 VALUES (?, ?, ?)
                 """,
-                (
-                    (playlist.playlist_id, video_id, position)
-                    for video_id, position in entries
-                ),
+                ((playlist.playlist_id, video_id, position) for video_id, position in entries),
             )
 
     def get_video(self, video_id: str, *, readonly: bool | None = None) -> CatalogVideo | None:

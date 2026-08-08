@@ -603,6 +603,31 @@ def test_open_clip_falls_back_to_timestamp_url(settings, monkeypatch) -> None:
     assert observed == [(f"{hit.webpage_url}&t={int(hit.start_seconds)}", None)]
 
 
+def test_play_rejects_catalog_media_outside_download_root(settings, monkeypatch, tmp_path) -> None:
+    outside_media = tmp_path / "outside.mp4"
+    outside_media.write_bytes(b"video")
+
+    class FakeCatalog:
+        def get_video(self, video_id):
+            return _catalog_video(video_id, output_path=outside_media)
+
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+    monkeypatch.setattr("yt_agent.cli._catalog", lambda settings, readonly=False: FakeCatalog())
+    monkeypatch.setattr(
+        "yt_agent.cli.launch_media",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("unsafe catalog path reached launcher")
+        ),
+    )
+
+    result = runner.invoke(app, ["play", "abc123def45", "--output", "json"])
+
+    assert result.exit_code == 4
+    assert json.loads(result.stderr)["message"] == (
+        "Catalog media path is outside the configured download root."
+    )
+
+
 def test_curate_commands_persist_and_search_user_metadata(settings, monkeypatch) -> None:
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
     _upsert_catalog_video(settings, "abc123def45")
@@ -953,6 +978,18 @@ def test_info_invalid_input_returns_input_exit_code(settings, monkeypatch) -> No
     result = runner.invoke(app, ["info", "bad"])
     assert result.exit_code == 4
     assert "bad target" in result.stderr
+
+
+def test_info_malformed_url_returns_json_input_error(settings, monkeypatch) -> None:
+    monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
+    monkeypatch.setattr("yt_agent.yt_dlp.command_path", lambda: "/usr/bin/yt-dlp")
+
+    result = runner.invoke(app, ["info", "https://[", "--output", "json"])
+
+    assert result.exit_code == 4
+    payload = json.loads(result.stderr)
+    assert payload["error_type"] == "InvalidInputError"
+    assert payload["message"] == "Target must be a valid YouTube URL."
 
 
 def test_external_error_output_strips_terminal_escapes(settings, monkeypatch) -> None:
@@ -1342,6 +1379,21 @@ def test_config_validate_exits_config_code_for_invalid_config(monkeypatch) -> No
     )
     result = runner.invoke(app, ["config", "validate"])
     assert result.exit_code == 5
+
+
+def test_config_validate_malformed_toml_returns_json_config_error(tmp_path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("download_root = [\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["config", "validate", "--config", str(config_path), "--output", "json"],
+    )
+
+    assert result.exit_code == 5
+    payload = json.loads(result.stderr)
+    assert payload["error_type"] == "ConfigError"
+    assert "invalid TOML" in payload["message"]
 
 
 # --- library channels ---

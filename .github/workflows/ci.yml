@@ -81,6 +81,8 @@ jobs:
         run: uv sync --dev
       - name: Lint
         run: uv run ruff check .
+      - name: Format
+        run: uv run ruff format --check .
       - name: Type check
         run: uv run mypy
       - name: Test

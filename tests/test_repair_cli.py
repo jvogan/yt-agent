@@ -14,8 +14,7 @@ def test_repair_defaults_to_preview_json(settings, monkeypatch) -> None:
     monkeypatch.setattr(
         "yt_agent.cli.repair_library",
         lambda current, apply=False: (
-            observed.append(apply)
-            or RepairReport(False, (RepairAction("rebuild_fts", "planned"),))
+            observed.append(apply) or RepairReport(False, (RepairAction("rebuild_fts", "planned"),))
         ),
     )
 

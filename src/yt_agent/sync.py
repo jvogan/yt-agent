@@ -89,9 +89,7 @@ class SourceStore:
         if not isinstance(payload, dict) or not isinstance(payload.get("sources"), list):
             raise InvalidInputError(f"Saved source file has an invalid structure: {self.path}")
         sources = [
-            SavedSource.from_dict(item)
-            for item in payload["sources"]
-            if isinstance(item, dict)
+            SavedSource.from_dict(item) for item in payload["sources"] if isinstance(item, dict)
         ]
         return sorted(sources, key=lambda item: item.name.casefold())
 

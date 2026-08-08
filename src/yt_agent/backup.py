@@ -483,8 +483,7 @@ def validate_catalog_backup(payload: object) -> BackupSummary:
     if len(tag_names) != len(set(tag_names)):
         raise InvalidInputError("Backup tags contains duplicate names.")
     collection_ids = {
-        value[0]
-        for value in _unique(records["collections"], ("collection_id",), "collections")
+        value[0] for value in _unique(records["collections"], ("collection_id",), "collections")
     }
     collection_names = [str(row["name"]).casefold() for row in records["collections"]]
     if len(collection_names) != len(set(collection_names)):

@@ -76,9 +76,7 @@ def _snapshot_from_row(row: Any) -> StatsSnapshot:
         video_id=str(row["video_id"]),
         view_count=int(row["view_count"]) if row["view_count"] is not None else None,
         like_count=int(row["like_count"]) if row["like_count"] is not None else None,
-        comment_count=int(row["comment_count"])
-        if row["comment_count"] is not None
-        else None,
+        comment_count=int(row["comment_count"]) if row["comment_count"] is not None else None,
         fetched_at=str(row["fetched_at"]),
         provider=str(row["provider"]),
     )
@@ -114,8 +112,7 @@ def refresh_stats(
     fetched_at = datetime.now(UTC).isoformat()
     if dry_run:
         return [
-            StatsSnapshot(None, video.video_id, None, None, None, fetched_at)
-            for video in videos
+            StatsSnapshot(None, video.video_id, None, None, None, fetched_at) for video in videos
         ]
     snapshots = []
     for video in videos:

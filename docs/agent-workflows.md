@@ -103,18 +103,18 @@ Use these commands when you need to back up the catalog, migrate it to another m
 
 **Export and import**
 
-`export` writes the full catalog to a portable JSON Lines file. `import` merges a previously exported file back into a catalog. Both support `--output json` for machine-readable feedback.
+`export` writes the catalog as a portable JSON array. `import` merges a previously exported file back into a catalog. Both support `--output json` for machine-readable feedback.
 
 ```bash
-yt-agent export ~/backups/catalog-$(date +%Y%m%d).jsonl --output json
-yt-agent import ~/backups/catalog-20260314.jsonl --dry-run --output json
+yt-agent export ~/backups/catalog-$(date +%Y%m%d).json --output json
+yt-agent import ~/backups/catalog-20260314.json --dry-run --output json
 # wait for approval
-yt-agent import ~/backups/catalog-20260314.jsonl --output json
+yt-agent import ~/backups/catalog-20260314.json --output json
 ```
 
 Export JSON envelope fields: `schema_version`, `command`, `status`, `summary` (with `exported` count), `warnings`, `errors`.
 
-Import JSON envelope fields: `schema_version`, `command`, `status`, `summary` (with `imported`, `skipped`, `failed` counts), `warnings`, `errors`.
+Import JSON envelope fields: `schema_version`, `command`, `status`, `summary` (with `imported`, `skipped`, and `dry_run`), `warnings`, `errors`.
 
 **History**
 

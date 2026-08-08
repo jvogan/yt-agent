@@ -58,13 +58,20 @@ def test_prompt_for_selection_returns_empty_without_results() -> None:
 
 def test_prompt_for_selection_uses_prompt_when_raw_selection_missing(monkeypatch) -> None:
     monkeypatch.setattr("yt_agent.selector.Prompt.ask", lambda message: "1,3")
-    selected = prompt_for_selection([_video("abc123def45"), _video("def123abc45"), _video("ghi123jkl45")])
+    selected = prompt_for_selection(
+        [_video("abc123def45"), _video("def123abc45"), _video("ghi123jkl45")]
+    )
     assert [item.video_id for item in selected] == ["abc123def45", "ghi123jkl45"]
 
 
 def test_select_results_falls_back_to_prompt(monkeypatch) -> None:
-    monkeypatch.setattr("yt_agent.selector.select_with_fzf", lambda results: (_ for _ in ()).throw(SelectionError("missing")))
-    selected = select_results([_video("abc123def45"), _video("def123abc45")], prefer_fzf=True, raw_selection="2")
+    monkeypatch.setattr(
+        "yt_agent.selector.select_with_fzf",
+        lambda results: (_ for _ in ()).throw(SelectionError("missing")),
+    )
+    selected = select_results(
+        [_video("abc123def45"), _video("def123abc45")], prefer_fzf=True, raw_selection="2"
+    )
     assert [item.video_id for item in selected] == ["def123abc45"]
 
 
@@ -122,7 +129,9 @@ def test_select_with_fzf_raises_stderr_message(monkeypatch) -> None:
     monkeypatch.setattr("yt_agent.selector.shutil.which", lambda name: "/opt/homebrew/bin/fzf")
     monkeypatch.setattr(
         "yt_agent.selector.subprocess.run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1, stdout="", stderr="broken pipe"),
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 1, stdout="", stderr="broken pipe"
+        ),
     )
 
     with pytest.raises(SelectionError, match="broken pipe"):
@@ -184,7 +193,10 @@ def test_select_results_returns_empty_without_results() -> None:
 
 def test_select_results_falls_back_to_prompt_without_raw_selection(monkeypatch) -> None:
     results = [_video("abc123def45"), _video("def123abc45")]
-    monkeypatch.setattr("yt_agent.selector.select_with_fzf", lambda results: (_ for _ in ()).throw(SelectionError("missing")))
+    monkeypatch.setattr(
+        "yt_agent.selector.select_with_fzf",
+        lambda results: (_ for _ in ()).throw(SelectionError("missing")),
+    )
     monkeypatch.setattr("yt_agent.selector.prompt_for_selection", lambda results: [results[0]])
 
     selected = select_results(results, configured_selector="fzf")

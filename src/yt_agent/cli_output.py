@@ -727,9 +727,7 @@ def _render_playlist_summary(
     console.print(table)
 
 
-def _render_doctor(
-    settings: Settings, *, output_mode: str = "table", deep: bool = False
-) -> bool:
+def _render_doctor(settings: Settings, *, output_mode: str = "table", deep: bool = False) -> bool:
     payload = _doctor_payload(settings, deep=deep)
     missing_required = any(tool["required"] and not tool["installed"] for tool in payload["tools"])
     mode = _normalize_output_mode(output_mode)
@@ -1493,11 +1491,11 @@ def _render_cleanup_payload(
         return
 
     summary = payload["summary"]
-    rows = [
-        {"kind": "cache_dir", "path": path} for path in payload["removed_cache_dirs"]
-    ] + [{"kind": "empty_dir", "path": path} for path in payload["removed_empty_dirs"]] + [
-        {"kind": "part_file", "path": path} for path in payload["removed_part_files"]
-    ]
+    rows = (
+        [{"kind": "cache_dir", "path": path} for path in payload["removed_cache_dirs"]]
+        + [{"kind": "empty_dir", "path": path} for path in payload["removed_empty_dirs"]]
+        + [{"kind": "part_file", "path": path} for path in payload["removed_part_files"]]
+    )
 
     if payload.get("dry_run"):
         console.print(

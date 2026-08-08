@@ -30,7 +30,6 @@ _SUBPROCESS_TIMEOUT_SECONDS = 300
 _MAX_CAPTURED_STDERR_CHARS = 4000
 
 
-
 @dataclass(frozen=True)
 class ClipExtraction:
     output_path: Path

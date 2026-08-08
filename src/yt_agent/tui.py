@@ -31,7 +31,6 @@ __all__ = [
 ]
 
 
-
 class CatalogLike(Protocol):
     def initialize(self) -> None: ...
     def list_channels(self) -> list[str]: ...

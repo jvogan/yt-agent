@@ -121,9 +121,7 @@ def load_transcript_document(
                 position=int(row["position"]),
                 title=str(row["title"]),
                 start_seconds=float(row["start_seconds"]),
-                end_seconds=float(row["end_seconds"])
-                if row["end_seconds"] is not None
-                else None,
+                end_seconds=float(row["end_seconds"]) if row["end_seconds"] is not None else None,
             )
             for row in chapter_rows
         ],
@@ -189,9 +187,7 @@ def render_transcript(
                     "start_seconds": item.start_seconds,
                     "end_seconds": item.end_seconds,
                     "timestamp": _timestamp(item.start_seconds) if timestamps else None,
-                    "chapter": _chapter_for(item, document.chapters)
-                    if group_chapters
-                    else None,
+                    "chapter": _chapter_for(item, document.chapters) if group_chapters else None,
                     "text": item.text,
                 }
                 for item in document.segments
@@ -255,9 +251,7 @@ def plan_local_transcription(
     if ffmpeg_path is None:
         raise DependencyError("ffmpeg is required to prepare audio for local transcription.")
     resolved_output = output_path or (
-        settings.catalog_file.parent
-        / "generated-transcripts"
-        / f"{video_id}.{language}.local.vtt"
+        settings.catalog_file.parent / "generated-transcripts" / f"{video_id}.{language}.local.vtt"
     )
     if resolved_output.suffix.casefold() != ".vtt":
         raise InvalidInputError("Transcript output must use the .vtt extension.")

@@ -23,7 +23,6 @@ __all__ = [
 ]
 
 
-
 def _coerce_duration(value: Any) -> int | None:
     if value in (None, ""):
         return None

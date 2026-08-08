@@ -46,7 +46,12 @@ def make_details(
     return {
         "video": video,
         "chapters": [
-            ChapterEntry(position=index, title=f"Chapter {index}", start_seconds=float(index), end_seconds=float(index + 1))
+            ChapterEntry(
+                position=index,
+                title=f"Chapter {index}",
+                start_seconds=float(index),
+                end_seconds=float(index + 1),
+            )
             for index in range(chapter_count)
         ],
         "subtitle_tracks": [
@@ -236,7 +241,12 @@ def make_harness(catalog: FakeCatalog) -> TuiHarness:
     details = FakeStatic()
     notifications: list[tuple[str, str | None]] = []
     copied: list[str] = []
-    widgets = {"#filter": filter_input, "#sources": list_view, "#videos": table, "#details": details}
+    widgets = {
+        "#filter": filter_input,
+        "#sources": list_view,
+        "#videos": table,
+        "#details": details,
+    }
 
     def fake_query_one(selector: str, expected_type: Any) -> Any:
         return widgets[selector]
@@ -256,13 +266,24 @@ def make_harness(catalog: FakeCatalog) -> TuiHarness:
 
 
 def test_on_mount_populates_sources_and_initial_video() -> None:
-    catalog = FakeCatalog(details={"all-video": make_details(make_video("all-video"), chapter_count=2, preview_count=2)})
+    catalog = FakeCatalog(
+        details={
+            "all-video": make_details(make_video("all-video"), chapter_count=2, preview_count=2)
+        }
+    )
     harness = make_harness(catalog)
 
     harness.app.on_mount()
 
     assert catalog.initialize_calls == 1
-    assert harness.table.columns == ["Video ID", "Title", "Channel", "Duration", "Transcripts", "Chapters"]
+    assert harness.table.columns == [
+        "Video ID",
+        "Title",
+        "Channel",
+        "Duration",
+        "Transcripts",
+        "Chapters",
+    ]
     assert harness.list_view.index == 0
     assert len(harness.list_view.children) == 5
     assert harness.table.row_count == 1
@@ -295,13 +316,45 @@ def test_load_videos_for_each_source_kind_uses_expected_filters() -> None:
     )
     harness = make_harness(catalog)
 
-    assert harness.app._load_videos_for_source(SourceItem("channel", "Alpha", "Alpha"))[0].video_id == "channel-video"
-    assert harness.app._load_videos_for_source(SourceItem("playlist", "Playlist One", "PL123"))[0].video_id == "playlist-video"
-    assert harness.app._load_videos_for_source(SourceItem("all", "All Videos"))[0].video_id == "all-video"
+    assert (
+        harness.app._load_videos_for_source(SourceItem("channel", "Alpha", "Alpha"))[0].video_id
+        == "channel-video"
+    )
+    assert (
+        harness.app._load_videos_for_source(SourceItem("playlist", "Playlist One", "PL123"))[
+            0
+        ].video_id
+        == "playlist-video"
+    )
+    assert (
+        harness.app._load_videos_for_source(SourceItem("all", "All Videos"))[0].video_id
+        == "all-video"
+    )
     assert catalog.list_video_calls == [
-        {"channel": "Alpha", "playlist_id": None, "has_transcript": None, "has_chapters": None, "limit": 51, "offset": 0},
-        {"channel": None, "playlist_id": "PL123", "has_transcript": None, "has_chapters": None, "limit": 51, "offset": 0},
-        {"channel": None, "playlist_id": None, "has_transcript": None, "has_chapters": None, "limit": 51, "offset": 0},
+        {
+            "channel": "Alpha",
+            "playlist_id": None,
+            "has_transcript": None,
+            "has_chapters": None,
+            "limit": 51,
+            "offset": 0,
+        },
+        {
+            "channel": None,
+            "playlist_id": "PL123",
+            "has_transcript": None,
+            "has_chapters": None,
+            "limit": 51,
+            "offset": 0,
+        },
+        {
+            "channel": None,
+            "playlist_id": None,
+            "has_transcript": None,
+            "has_chapters": None,
+            "limit": 51,
+            "offset": 0,
+        },
     ]
 
 
@@ -357,20 +410,26 @@ def test_input_filter_matches_title_and_channel_case_insensitively_and_clears() 
     assert harness.table.row_keys == ["video-1", "video-2", "video-3"]
 
     harness.filter_input.value = "bEtA"
-    harness.app.on_input_changed(SimpleNamespace(input=harness.filter_input, value=harness.filter_input.value))
+    harness.app.on_input_changed(
+        SimpleNamespace(input=harness.filter_input, value=harness.filter_input.value)
+    )
 
     assert harness.table.row_keys == ["video-2"]
     assert harness.app.selected_video_id == "video-2"
     assert catalog.search_video_calls[-1]["query"] == "bEtA"
 
     harness.filter_input.value = "alpha"
-    harness.app.on_input_changed(SimpleNamespace(input=harness.filter_input, value=harness.filter_input.value))
+    harness.app.on_input_changed(
+        SimpleNamespace(input=harness.filter_input, value=harness.filter_input.value)
+    )
 
     assert harness.table.row_keys == ["video-1"]
     assert harness.app.selected_video_id == "video-1"
 
     harness.filter_input.value = ""
-    harness.app.on_input_changed(SimpleNamespace(input=harness.filter_input, value=harness.filter_input.value))
+    harness.app.on_input_changed(
+        SimpleNamespace(input=harness.filter_input, value=harness.filter_input.value)
+    )
 
     assert harness.table.row_keys == ["video-1", "video-2", "video-3"]
     assert harness.app.selected_video_id == "video-1"
@@ -378,7 +437,12 @@ def test_input_filter_matches_title_and_channel_case_insensitively_and_clears() 
 
 def test_set_selected_video_handles_missing_payload_and_limits_preview_sections() -> None:
     video = make_video("video-123", title="Video [Title]")
-    catalog = FakeCatalog(details={"video-123": make_details(video, chapter_count=7, preview_count=7), "missing": None})
+    catalog = FakeCatalog(
+        details={
+            "video-123": make_details(video, chapter_count=7, preview_count=7),
+            "missing": None,
+        }
+    )
     harness = make_harness(catalog)
 
     harness.app._set_selected_video("missing")
@@ -402,10 +466,15 @@ def test_selection_handlers_ignore_irrelevant_events_and_apply_valid_selection()
         details={first.video_id: make_details(first), second.video_id: make_details(second)},
     )
     harness = make_harness(catalog)
-    harness.app._source_items = [SourceItem("all", "All Videos"), SourceItem("channel", "Alpha", "Alpha")]
+    harness.app._source_items = [
+        SourceItem("all", "All Videos"),
+        SourceItem("channel", "Alpha", "Alpha"),
+    ]
     harness.app._videos = [first, second]
 
-    harness.app.on_list_view_selected(SimpleNamespace(list_view=FakeListView(view_id="other", index=0)))
+    harness.app.on_list_view_selected(
+        SimpleNamespace(list_view=FakeListView(view_id="other", index=0))
+    )
     harness.app.on_list_view_selected(SimpleNamespace(list_view=FakeListView(index=None)))
     assert not catalog.list_video_calls
 
@@ -413,20 +482,28 @@ def test_selection_handlers_ignore_irrelevant_events_and_apply_valid_selection()
     assert harness.app.selected_source == SourceItem("channel", "Alpha", "Alpha")
     assert harness.app.selected_video_id == "video-1"
 
-    harness.app.on_data_table_row_highlighted(SimpleNamespace(data_table=FakeDataTable(table_id="other"), cursor_row=1))
+    harness.app.on_data_table_row_highlighted(
+        SimpleNamespace(data_table=FakeDataTable(table_id="other"), cursor_row=1)
+    )
     assert harness.app.selected_video_id == "video-1"
 
-    harness.app.on_data_table_row_highlighted(SimpleNamespace(data_table=FakeDataTable(), cursor_row=5))
+    harness.app.on_data_table_row_highlighted(
+        SimpleNamespace(data_table=FakeDataTable(), cursor_row=5)
+    )
     assert harness.app.selected_video_id == "video-1"
 
-    harness.app.on_data_table_row_highlighted(SimpleNamespace(data_table=FakeDataTable(), cursor_row=1))
+    harness.app.on_data_table_row_highlighted(
+        SimpleNamespace(data_table=FakeDataTable(), cursor_row=1)
+    )
     assert harness.app.selected_video_id == "video-2"
 
 
 def test_row_highlight_ignores_events_when_no_videos_loaded() -> None:
     harness = make_harness(FakeCatalog())
 
-    harness.app.on_data_table_row_highlighted(SimpleNamespace(data_table=FakeDataTable(), cursor_row=0))
+    harness.app.on_data_table_row_highlighted(
+        SimpleNamespace(data_table=FakeDataTable(), cursor_row=0)
+    )
 
     assert harness.app.selected_video_id is None
 
@@ -448,10 +525,34 @@ def test_refresh_catalog_reloads_selected_source_and_notifies() -> None:
     [
         (None, None, False, False, ("No video selected.", "warning")),
         ("video-1", None, False, False, ("Selected video has no local media path.", "warning")),
-        ("video-1", make_details(make_video("video-1", output_path=None)), False, False, ("Selected video has no local media path.", "warning")),
-        ("video-1", make_details(make_video("video-1", output_path=Path("/tmp/missing.mp4"))), False, False, ("Local media path is missing on disk.", "warning")),
-        ("video-1", make_details(make_video("video-1", output_path=Path("/tmp/demo.mp4"))), True, False, ("Opening local media is only supported on macOS, Linux, and Windows.", "warning")),
-        ("video-1", make_details(make_video("video-1", output_path=Path("/tmp/demo.mp4"))), True, True, ("Opened demo.mp4", None)),
+        (
+            "video-1",
+            make_details(make_video("video-1", output_path=None)),
+            False,
+            False,
+            ("Selected video has no local media path.", "warning"),
+        ),
+        (
+            "video-1",
+            make_details(make_video("video-1", output_path=Path("/tmp/missing.mp4"))),
+            False,
+            False,
+            ("Local media path is missing on disk.", "warning"),
+        ),
+        (
+            "video-1",
+            make_details(make_video("video-1", output_path=Path("/tmp/demo.mp4"))),
+            True,
+            False,
+            ("Opening local media is only supported on macOS, Linux, and Windows.", "warning"),
+        ),
+        (
+            "video-1",
+            make_details(make_video("video-1", output_path=Path("/tmp/demo.mp4"))),
+            True,
+            True,
+            ("Opened demo.mp4", None),
+        ),
     ],
 )
 def test_action_open_media_reports_expected_status(
@@ -516,7 +617,9 @@ def test_clip_and_download_actions_sanitize_selected_video_id() -> None:
     assert harness.copied == ["abc123 def45"]
 
 
-def test_launch_tui_constructs_catalog_store_and_runs_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_launch_tui_constructs_catalog_store_and_runs_app(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     created: dict[str, Any] = {}
 
     class FakeStore:
@@ -546,12 +649,16 @@ def test_launch_tui_constructs_catalog_store_and_runs_app(monkeypatch: pytest.Mo
     assert isinstance(created["store"], FakeStore)
 
 
-def test_open_with_system_default_returns_false_on_unsupported_platform(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_open_with_system_default_returns_false_on_unsupported_platform(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr("yt_agent.tui.sys.platform", "plan9")
     assert open_with_system_default(tmp_path / "demo.mp4") is False
 
 
-def test_open_with_system_default_uses_darwin_launcher(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_open_with_system_default_uses_darwin_launcher(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     launched: list[list[str]] = []
 
     monkeypatch.setattr("yt_agent.tui.sys.platform", "darwin")
@@ -572,14 +679,18 @@ def test_open_with_system_default_returns_false_when_darwin_launcher_missing(
     assert open_with_system_default(tmp_path / "demo.mp4") is False
 
 
-def test_open_with_system_default_returns_false_when_linux_launcher_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_open_with_system_default_returns_false_when_linux_launcher_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr("yt_agent.tui.sys.platform", "linux")
     monkeypatch.setattr("yt_agent.tui.shutil.which", lambda name: None)
 
     assert open_with_system_default(tmp_path / "demo.mp4") is False
 
 
-def test_open_with_system_default_uses_linux_launcher(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_open_with_system_default_uses_linux_launcher(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     launched: list[list[str]] = []
 
     monkeypatch.setattr("yt_agent.tui.sys.platform", "linux")
@@ -591,11 +702,15 @@ def test_open_with_system_default_uses_linux_launcher(monkeypatch: pytest.Monkey
     assert launched == [["/usr/bin/xdg-open", str(path)]]
 
 
-def test_open_with_system_default_uses_windows_startfile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_open_with_system_default_uses_windows_startfile(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     started: list[str] = []
 
     monkeypatch.setattr("yt_agent.tui.sys.platform", "win32")
-    monkeypatch.setattr("yt_agent.tui.os", SimpleNamespace(startfile=lambda path: started.append(path)))
+    monkeypatch.setattr(
+        "yt_agent.tui.os", SimpleNamespace(startfile=lambda path: started.append(path))
+    )
 
     path = tmp_path / "demo.mp4"
     assert open_with_system_default(path) is True

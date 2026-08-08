@@ -52,7 +52,9 @@ def _seed_catalog_video(settings, *, output_path: Path | None = None) -> None:
 def test_download_json_envelope_reports_downloaded_items(settings, monkeypatch) -> None:
     target = DownloadTarget(original_input="abc123def45", info=_video())
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._resolve_download_inputs", lambda *args, **kwargs: ([target], []))
+    monkeypatch.setattr(
+        "yt_agent.cli._resolve_download_inputs", lambda *args, **kwargs: ([target], [])
+    )
     monkeypatch.setattr(
         "yt_agent.cli.yt_dlp.download_target",
         lambda target, current_settings, **kwargs: DownloadExecution(
@@ -78,10 +80,14 @@ def test_download_json_envelope_reports_downloaded_items(settings, monkeypatch) 
 def test_download_dry_run_does_not_write_state(settings, monkeypatch) -> None:
     target = DownloadTarget(original_input="abc123def45", info=_video())
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
-    monkeypatch.setattr("yt_agent.cli._resolve_download_inputs", lambda *args, **kwargs: ([target], []))
+    monkeypatch.setattr(
+        "yt_agent.cli._resolve_download_inputs", lambda *args, **kwargs: ([target], [])
+    )
     monkeypatch.setattr(
         "yt_agent.cli.yt_dlp.download_target",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("download should not run during dry-run")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("download should not run during dry-run")
+        ),
     )
 
     result = runner.invoke(app, ["download", "--dry-run", "--output", "json", "abc123def45"])
@@ -99,7 +105,9 @@ def test_download_dry_run_does_not_write_state(settings, monkeypatch) -> None:
 def test_download_json_error_payload_is_used_for_busy_lock(settings, monkeypatch) -> None:
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
     target = DownloadTarget(original_input="abc123def45", info=_video())
-    monkeypatch.setattr("yt_agent.cli._resolve_download_inputs", lambda *args, **kwargs: ([target], []))
+    monkeypatch.setattr(
+        "yt_agent.cli._resolve_download_inputs", lambda *args, **kwargs: ([target], [])
+    )
 
     @contextmanager
     def busy_lock(path):
@@ -191,7 +199,9 @@ def test_index_refresh_dry_run_is_local_only(settings, monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "yt_agent.cli.index_refresh",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("index_refresh should not run during dry-run")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("index_refresh should not run during dry-run")
+        ),
     )
 
     result = runner.invoke(app, ["index", "refresh", "--dry-run", "--output", "json"])
@@ -306,7 +316,9 @@ def test_clips_grab_rejects_mixed_locator_modes(settings, monkeypatch) -> None:
 def test_library_remove_dry_run_does_not_create_catalog(settings, monkeypatch) -> None:
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
 
-    result = runner.invoke(app, ["library", "remove", "--dry-run", "--output", "json", "abc123def45"])
+    result = runner.invoke(
+        app, ["library", "remove", "--dry-run", "--output", "json", "abc123def45"]
+    )
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)

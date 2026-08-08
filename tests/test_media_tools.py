@@ -44,7 +44,9 @@ def _seed(settings) -> Path:
         "abc123def45",
         [
             (
-                SubtitleTrack("en", "manual", False, "vtt", settings.catalog_file.parent / "en.vtt"),
+                SubtitleTrack(
+                    "en", "manual", False, "vtt", settings.catalog_file.parent / "en.vtt"
+                ),
                 [TranscriptSegment(0, 10.0, 20.0, "smart boundary")],
             )
         ],

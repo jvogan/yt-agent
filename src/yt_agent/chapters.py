@@ -11,7 +11,6 @@ __all__ = [
 ]
 
 
-
 def extract_chapters(payload: dict[str, Any]) -> list[ChapterEntry]:
     chapters = payload.get("chapters")
     if not isinstance(chapters, list):

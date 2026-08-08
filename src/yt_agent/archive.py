@@ -14,7 +14,6 @@ __all__ = [
 ]
 
 
-
 def ensure_archive_file(path: Path) -> None:
     ensure_private_file(path)
 

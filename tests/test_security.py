@@ -166,7 +166,9 @@ def test_chmod_ignores_missing_files() -> None:
 def test_chmod_is_noop_on_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls: list[tuple[Path, int]] = []
     monkeypatch.setattr("yt_agent.security.os.name", "nt", raising=False)
-    monkeypatch.setattr("yt_agent.security.os.chmod", lambda path, mode: calls.append((Path(path), mode)))
+    monkeypatch.setattr(
+        "yt_agent.security.os.chmod", lambda path, mode: calls.append((Path(path), mode))
+    )
 
     _chmod(tmp_path / "demo.txt", 0o600)
 
@@ -230,7 +232,9 @@ def test_operation_lock_windows_branch(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert calls == [(1, 1), (2, 1)]
 
 
-def test_operation_lock_windows_branch_raises_state_lock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_operation_lock_windows_branch_raises_state_lock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     def fail_lock(fd: int, mode: int, size: int) -> None:
         raise OSError("busy")
 
@@ -243,7 +247,9 @@ def test_operation_lock_windows_branch_raises_state_lock(monkeypatch: pytest.Mon
             pass
 
 
-def test_operation_lock_ignores_windows_unlock_errors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_operation_lock_ignores_windows_unlock_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     calls: list[tuple[int, int]] = []
 
     def fake_lock(fd: int, mode: int, size: int) -> None:

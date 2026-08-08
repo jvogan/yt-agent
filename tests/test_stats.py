@@ -113,9 +113,7 @@ def test_stats_snapshots_round_trip_in_lossless_backup(
     assert stats_history(destination, "abc123def45")[0].view_count == 12
 
 
-def test_stats_cli_refresh_show_and_trends(
-    settings, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_stats_cli_refresh_show_and_trends(settings, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed(settings, "abc123def45")
     monkeypatch.setattr("yt_agent.cli._load_settings", lambda config=None: settings)
     payloads = iter(
@@ -132,12 +130,8 @@ def test_stats_cli_refresh_show_and_trends(
             ["stats", "refresh", "abc123def45", "--output", "json"],
         )
         assert refreshed.exit_code == 0, refreshed.stdout
-    shown = runner.invoke(
-        app, ["stats", "show", "abc123def45", "--output", "json"]
-    )
-    trends = runner.invoke(
-        app, ["stats", "trends", "abc123def45", "--output", "json"]
-    )
+    shown = runner.invoke(app, ["stats", "show", "abc123def45", "--output", "json"])
+    trends = runner.invoke(app, ["stats", "trends", "abc123def45", "--output", "json"])
 
     assert len(json.loads(shown.stdout)["snapshots"]) == 2
     assert json.loads(trends.stdout)["trends"][0]["view_delta"] == 5

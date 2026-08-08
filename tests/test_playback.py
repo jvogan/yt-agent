@@ -37,6 +37,21 @@ def test_launch_media_uses_system_opener_fallback_without_shell(monkeypatch) -> 
     ]
 
 
+def test_launch_media_uses_windows_startfile(monkeypatch) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr("yt_agent.playback.shutil.which", lambda name: None)
+    monkeypatch.setattr("yt_agent.playback.sys.platform", "win32")
+    monkeypatch.setattr(
+        "yt_agent.playback.os.startfile", lambda target: opened.append(target), raising=False
+    )
+    target = "https://www.youtube.com/watch?v=abc123def45"
+
+    args = launch_media(target)
+
+    assert args == ["startfile", target]
+    assert opened == [target]
+
+
 def test_launch_media_rejects_non_youtube_urls(monkeypatch) -> None:
     monkeypatch.setattr("yt_agent.playback.shutil.which", lambda name: "/usr/bin/mpv")
     with pytest.raises(InvalidInputError, match="Only YouTube URLs"):

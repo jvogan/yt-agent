@@ -41,7 +41,9 @@ def _seed_video(settings, file_path: Path | None = None) -> None:
     )
 
 
-def _clip_hit(*, start_seconds: float = 5.0, end_seconds: float = 10.0, output_path: Path | None = None) -> ClipSearchHit:
+def _clip_hit(
+    *, start_seconds: float = 5.0, end_seconds: float = 10.0, output_path: Path | None = None
+) -> ClipSearchHit:
     return ClipSearchHit(
         result_id="transcript:1",
         source="transcript",
@@ -72,14 +74,18 @@ def _video_info() -> VideoInfo:
 
 
 def test_clip_bounds_applies_padding() -> None:
-    start_seconds, end_seconds = _clip_bounds(_clip_hit(start_seconds=5.0, end_seconds=8.0), 1.5, 2.0)
+    start_seconds, end_seconds = _clip_bounds(
+        _clip_hit(start_seconds=5.0, end_seconds=8.0), 1.5, 2.0
+    )
 
     assert start_seconds == pytest.approx(3.5)
     assert end_seconds == pytest.approx(10.0)
 
 
 def test_clip_bounds_clamps_negative_start_and_enforces_minimum_duration() -> None:
-    start_seconds, end_seconds = _clip_bounds(_clip_hit(start_seconds=0.05, end_seconds=0.06), 0.5, 0.0)
+    start_seconds, end_seconds = _clip_bounds(
+        _clip_hit(start_seconds=0.05, end_seconds=0.06), 0.5, 0.0
+    )
 
     assert start_seconds == 0.0
     assert end_seconds == pytest.approx(0.1)
@@ -96,9 +102,7 @@ def test_clip_bounds_rejects_non_finite_values(value: float) -> None:
 
 
 @pytest.mark.parametrize("padding_before,padding_after", [(-1.0, 0.0), (0.0, -1.0)])
-def test_clip_bounds_rejects_negative_padding(
-    padding_before: float, padding_after: float
-) -> None:
+def test_clip_bounds_rejects_negative_padding(padding_before: float, padding_after: float) -> None:
     with pytest.raises(InvalidInputError, match="must not be negative"):
         _clip_bounds(_clip_hit(), padding_before, padding_after)
 
@@ -267,7 +271,9 @@ def test_extract_resolved_clip_uses_local_ffmpeg_args(
     assert not Path(recorded[0][-1]).exists()
 
 
-def test_extract_resolved_clip_prefers_remote_when_requested(settings, monkeypatch, tmp_path: Path) -> None:
+def test_extract_resolved_clip_prefers_remote_when_requested(
+    settings, monkeypatch, tmp_path: Path
+) -> None:
     media_path = settings.download_root / "source.mp4"
     media_path.parent.mkdir(parents=True, exist_ok=True)
     media_path.write_bytes(b"video")
@@ -405,7 +411,9 @@ def test_extract_resolved_clip_revalidates_remote_url(settings, monkeypatch) -> 
     assert calls == []
 
 
-def test_extract_resolved_clip_rehardens_clip_directory(settings, monkeypatch, tmp_path: Path) -> None:
+def test_extract_resolved_clip_rehardens_clip_directory(
+    settings, monkeypatch, tmp_path: Path
+) -> None:
     media_path = settings.download_root / "source.mkv"
     media_path.parent.mkdir(parents=True, exist_ok=True)
     media_path.write_bytes(b"video")
@@ -491,7 +499,9 @@ def test_extract_clip_uses_remote_fallback(settings, monkeypatch) -> None:
     monkeypatch.setattr("yt_agent.clips.command_path", lambda: "/opt/homebrew/bin/yt-dlp")
     monkeypatch.setattr("yt_agent.clips._run", fake_run)
 
-    extraction = extract_clip(settings, "transcript:1", padding_before=1, padding_after=1, mode="fast", prefer_remote=True)
+    extraction = extract_clip(
+        settings, "transcript:1", padding_before=1, padding_after=1, mode="fast", prefer_remote=True
+    )
 
     assert extraction.source == "remote"
     assert extraction.output_path.exists()
@@ -576,7 +586,9 @@ def test_plan_clip_for_range_rejects_non_finite_times(
         )
 
 
-def test_extract_clip_for_range_clamps_negative_start_and_uses_catalog_video(settings, monkeypatch) -> None:
+def test_extract_clip_for_range_clamps_negative_start_and_uses_catalog_video(
+    settings, monkeypatch
+) -> None:
     source_path = settings.download_root / "demo.mp4"
     source_path.parent.mkdir(parents=True, exist_ok=True)
     source_path.write_bytes(b"video")
